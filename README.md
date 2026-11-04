@@ -66,13 +66,32 @@ node src/derive-check.cjs <rime schema 目录> --check   # 与 src/schemes.cjs �
 - 「记录」页显示：收集进度、最容易卡的键与常按错的键（并排）、卡过的字，以及**最近输入 / 输入法回显采样 / 卡壳过程**三栏并列。面板高度有上限、只滚正文，所以记录页再长也能随时点回「键位」页。
 - 「练习」页可以切到 **我的错字**，只练你卡过的字。
 
-数据只写本机，不上传：
+## 隐私
 
-- `dsh.xiaohe-shuangpin.prefs.v4`：位置、宽度、透明度、页签、开关、当前方案与自定义键位
-- `dsh.xiaohe-shuangpin.stats.v2`：每字/每键统计、最近 30 条输入、输入法回显采样
-- cookie 镜像 `dsh.xiaohe.mirror.*`：上面两份数据的压缩副本。因为 GUI 端口每次启动会变，而 `localStorage` 按端口隔离，cookie 不分端口——换端口首次启动时自动从镜像恢复统计，重启不再清零（镜像最多保留 400 个字、12 条最近输入；完整数据仍在当前端口的 localStorage 里）。
+**不联网、不上传、无第三方请求。** 全部数据只留在本机浏览器里，可用「记录」页的「清空」一键清除。
 
-「记录」页有「清空」（会同时清掉 localStorage 和 cookie 镜像）。
+这个插件需要在输入框上统计打字，因此有必要说清楚它**读了什么、存在哪**：
+
+**读什么**：只监听宿主的可编辑区域（`textarea`、文本输入框、`contenteditable`），
+读取输入法上屏的文本与合成期间暴露的预编辑串，用于计算速度、退格与卡顿。
+**不读按键内容之外的任何东西**：不注入输入框、不改写你的输入、不拦截按键默认行为、
+不读取其它页面、不做任何网络请求。插件自己的面板（如「改键位」输入框）已被显式排除，
+不会被计入统计。
+
+**存在哪**：
+
+| 位置 | 内容 | 说明 |
+|------|------|------|
+| `localStorage` `dsh.xiaohe-shuangpin.prefs.v4` | 位置、宽度、透明度、页签、方案、自定义键位 | 纯偏好 |
+| `localStorage` `dsh.xiaohe-shuangpin.stats.v2` | 逐字/逐键统计、最近 30 条输入、回显采样、卡壳过程 | 完整数据，仅此端口可见 |
+| cookie `dsh.xiaohe.mirror.*` | **仅聚合计数**：键次数、错键次数、进度基数 | 见下 |
+
+cookie 镜像的存在理由：GUI 端口每次启动会变，而 `localStorage` 按端口隔离、
+cookie 不分端口，所以用一条小 cookie 让统计在换端口后还能接上。
+**镜像刻意不含用户输入原文**——不带打过的字、不带拼音、不带卡壳序列，
+因为 cookie 会随同源请求自动发送、且同域脚本可读。镜像约 1KB、1 条 cookie，
+`SameSite=Lax`，https 下自动加 `Secure`。旧版本曾把原文写进镜像，
+升级后会检测并自动重写清除。
 
 ## 键位表（小鹤双拼；其余方案在面板标题里切换）
 
@@ -123,11 +142,16 @@ src/smoke.cjs           本地渲染/捕获冒烟测试
 src/smoke-scheme.cjs    方案切换渲染测试
 src/smoke-picker.cjs    自绘下拉交互测试（展开/选中/收起）
 src/smoke-height.cjs    新会话高度回归（面板/键盘不被压扁）
+src/smoke-mirror.cjs    cookie 镜像行为（不含原文 / 可恢复 / 旧数据清除）
+src/mirror-size.cjs     镜像体积与隐私体检（估算 cookie 条数与上限）
+src/smoke-proto.cjs     恶意统计数据不污染原型
+src/add-fallbacks.cjs   给主题变量补兜底色（幂等，人工执行）
 src/lint-locale.cjs     文案体检（死字符串 / 重复 key），构建时自动跑
 src/layout-check.cjs    记录页三栏布局估算（窄面板是否会被挤扁）
 src/key-size.cjs        键位尺寸换算表（人工核对用）
 locale/                 zh/en 标题与描述
 icon.svg                图标
+LICENSE                 MIT（含第三方数据说明）
 ```
 
 改完源码后：
@@ -140,9 +164,14 @@ node src/smoke.cjs . map          # 还有 drill / stats / float / fab / capture
 node src/smoke-scheme.cjs .       # 方案切换与自定义编辑器
 node src/smoke-picker.cjs .       # 下拉展开/选中/收起
 node src/smoke-height.cjs .       # 面板/键盘不可被压扁
+node src/smoke-mirror.cjs .       # cookie 镜像不含输入原文、可跨端口恢复
+node src/mirror-size.cjs          # 镜像体积与隐私体检
+node src/smoke-proto.cjs .        # 恶意统计数据不污染原型
 node src/layout-check.cjs         # 记录页三栏布局估算
 node src/derive-check.cjs <rime schema 目录> --check
 ```
+
+也可以直接 `npm test`（等价于上面除 `derive-check` 的全部检查）与 `npm run build`。
 
 ## 已知限制
 

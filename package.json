@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "双拼键位提醒：可拖动、可拉伸的悬浮面板，自动收集打字速度与卡顿，给键位加热力标记，卡住时亮键，并把卡过的字做成练习。内置多种常见双拼方案，也可自定义键位。",
+  "license": "MIT",
+  "keywords": [
+    "dsh-plugin",
+    "shuangpin",
+    "input-method",
+    "typing-practice",
+    "keyboard"
+  ],
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -15,8 +23,22 @@
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "src/*.cjs",
+    "src/client.template.js",
+    "src/dict-src.txt"
   ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node src/build-client.cjs src client.js",
+    "test": "node src/schemes.test.cjs && node src/smoke.cjs . map && node src/smoke.cjs . drill && node src/smoke.cjs . stats && node src/smoke.cjs . float && node src/smoke.cjs . fab && node src/smoke.cjs . capture && node src/smoke-scheme.cjs . && node src/smoke-picker.cjs . && node src/smoke-height.cjs . && node src/smoke-mirror.cjs . && node src/mirror-size.cjs && node src/layout-check.cjs",
+    "lint": "node src/lint-locale.cjs",
+    "check:schemes": "node src/derive-check.cjs .tmp-schemes --check"
+  },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

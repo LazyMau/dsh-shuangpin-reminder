@@ -306,24 +306,38 @@ window.__ModuleLoader__.load({
     }
 
     /* ---------- 跨端口兜底：localStorage 按「协议+主机+端口」隔离，而 GUI 端口每次启动会变。
-       把偏好和统计镜像到 cookie（cookie 不区分端口），换端口首次启动时恢复 ---------- */
+       把**聚合统计**镜像到 cookie（cookie 不区分端口），换端口首次启动时恢复。
+       注意：镜像只放计数，不放用户输入原文，详见 slimForMirror。 ---------- */
     const MIRROR_BASE = 'dsh.xiaohe.mirror.'
+    const MIRROR_CHUNK = 3500
+    const MIRROR_MAX_CHUNKS = 4
     let mirrorChunks = 0
+
+    /** 仅 https 下加 Secure（http/本地端口的 Secure cookie 会被浏览器直接丢弃） */
+    function cookieTail() {
+      let secure = ''
+      try {
+        if (typeof location !== 'undefined' && location && location.protocol === 'https:') secure = '; Secure'
+      } catch (error) { /* 取不到 location 就不加 */ }
+      return '; path=/; SameSite=Lax' + secure
+    }
 
     function writeMirror(payload) {
       try {
         const encoded = encodeURIComponent(JSON.stringify(payload))
         const chunks = []
-        for (let i = 0; i < encoded.length; i += 3600) chunks.push(encoded.slice(i, i + 3600))
-        if (chunks.length > 40) return
+        for (let i = 0; i < encoded.length; i += MIRROR_CHUNK) chunks.push(encoded.slice(i, i + MIRROR_CHUNK))
+        // 超出预算说明数据异常，宁可放弃镜像也不要写一大堆 cookie
+        if (chunks.length > MIRROR_MAX_CHUNKS) return
+        const tail = cookieTail()
         for (let i = chunks.length; i < mirrorChunks; i += 1) {
-          document.cookie = MIRROR_BASE + i + '=; Max-Age=0; path=/; SameSite=Lax'
+          document.cookie = MIRROR_BASE + i + '=; Max-Age=0' + tail
         }
         mirrorChunks = chunks.length
         chunks.forEach(function (chunk, index) {
-          document.cookie = MIRROR_BASE + index + '=' + chunk + '; Max-Age=31536000; path=/; SameSite=Lax'
+          document.cookie = MIRROR_BASE + index + '=' + chunk + '; Max-Age=31536000' + tail
         })
-      } catch (error) { /* ignore */ }
+      } catch (error) { /* 隐私/容量问题都不该影响主流程 */ }
     }
 
     function readMirror() {
@@ -350,38 +364,55 @@ window.__ModuleLoader__.load({
 
     function wipeMirror() {
       try {
-        for (let i = 0; i < Math.max(mirrorChunks, 40); i += 1) {
-          document.cookie = MIRROR_BASE + i + '=; Max-Age=0; path=/; SameSite=Lax'
+        const tail = cookieTail()
+        // 40 是旧版本用过的高上限：确保旧数据也能被清干净
+        for (let i = 0; i < 40; i += 1) {
+          document.cookie = MIRROR_BASE + i + '=; Max-Age=0' + tail
         }
         mirrorChunks = 0
       } catch (error) { /* ignore */ }
     }
 
+    /** 旧格式镜像（含用户输入原文）是否还残留在 cookie 里 */
+    function readMirrorLegacyLeftover() {
+      const mirror = readMirror()
+      if (!mirror || !mirror.stats || typeof mirror.stats !== 'object') return false
+      const s = mirror.stats
+      return Boolean(
+        (Array.isArray(s.events) && s.events.length) ||
+        (Array.isArray(s.echo) && s.echo.length) ||
+        (Array.isArray(s.stalls) && s.stalls.length) ||
+        (s.chars && Object.keys(s.chars).length) ||
+        (s.bigram && Object.keys(s.bigram).length) ||
+        (typeof s.lastChar === 'string' && s.lastChar),
+      )
+    }
+
+    /**
+     * 生成 cookie 镜像的内容。
+     *
+     * 隐私考虑：cookie 会随同源请求自动发送，且同域任意脚本可读，
+     * 不适合承载「用户打过哪些字、哪些拼音」这类原文。因此镜像只保留
+     * 恢复统计所需的**聚合计数**（字数、键数、错键次数），
+     * 不带 events / echo / stalls / lastChar 这些原文，也不带字数表。
+     */
     function slimForMirror(stats) {
-      const chars = {}
-      const names = Object.keys(stats.chars || {})
-      names.sort(function (a, b) { return (stats.chars[b].at || 0) - (stats.chars[a].at || 0) })
-      names.slice(0, 300).forEach(function (ch) { chars[ch] = stats.chars[ch] })
-      const bigram = {}
-      Object.keys(stats.bigram || {})
-        .sort(function (a, b) { return (stats.bigram[b] || 0) - (stats.bigram[a] || 0) })
-        .slice(0, 200).forEach(function (key) { bigram[key] = stats.bigram[key] })
       const wrong = {}
       Object.keys(stats.wrong || {})
         .sort(function (a, b) { return (stats.wrong[b] || 0) - (stats.wrong[a] || 0) })
         .slice(0, 30).forEach(function (key) { wrong[key] = stats.wrong[key] })
+      const keys = {}
+      Object.keys(stats.keys || {}).forEach(function (key) {
+        const row = stats.keys[key]
+        if (!row) return
+        keys[key] = { n: row.n || 0, bad: row.bad || 0 }
+      })
       return {
         v: stats.v,
         rev: stats.rev,
         base: stats.base,
-        chars: chars,
-        keys: stats.keys || {},
-        events: (stats.events || []).slice(0, 12),
-        echo: (stats.echo || []).slice(0, 12),
-        stalls: (stats.stalls || []).slice(0, 10),
+        keys: keys,
         wrong: wrong,
-        bigram: bigram,
-        lastChar: stats.lastChar || '',
       }
     }
 
@@ -423,6 +454,9 @@ window.__ModuleLoader__.load({
           storedStats = mirror.stats
         }
       }
+      // 旧版本的镜像里带有用户输入原文（events/echo/stalls/lastChar）。
+      // 升级后立刻重写一次镜像，把历史残留清掉。
+      if (readMirrorLegacyLeftover()) writeMirror({ stats: slimForMirror(normalizeStats(storedStats)) })
       const prefs = Object.assign({}, DEFAULT_PREFS, storedPrefs || {})
       const state = {
         prefs: prefs,
@@ -707,8 +741,8 @@ window.__ModuleLoader__.load({
     }
 
     const HEAT_COLORS = {
-      warn: 'var(--dsw-alias-state-warn-primary)',
-      bad: 'var(--dsw-alias-state-error-primary)',
+      warn: 'var(--dsw-alias-state-warn-primary, #c98a1b)',
+      bad: 'var(--dsw-alias-state-error-primary, #d64545)',
     }
     /** null = 稳（不做任何标记），warn = 不稳（黄条），bad = 常卡（红条+红边） */
     function heatLevel(weakness) {
@@ -775,6 +809,17 @@ window.__ModuleLoader__.load({
     }
 
     /* ================= 输入捕获 ================= */
+    /** 插件自身面板的标记：用来把「编辑键位」这类输入排除在打字统计之外 */
+    const SELF_ATTR = 'data-xiaohe-ui'
+
+    function inSelfUI(el) {
+      try {
+        return Boolean(el && typeof el.closest === 'function' && el.closest('[' + SELF_ATTR + ']'))
+      } catch (error) {
+        return false
+      }
+    }
+
     function isEditable(el) {
       if (!el || el.nodeType !== 1) return false
       const tag = el.tagName
@@ -786,6 +831,11 @@ window.__ModuleLoader__.load({
       return el.isContentEditable === true
     }
 
+    /** 只有「用户真正在打字的输入区」才计数：排除插件自己的编辑器 */
+    function isTypingTarget(el) {
+      return isEditable(el) && !inSelfUI(el)
+    }
+
     function installTypingCapture(store) {
       let composing = null
       let compStart = 0
@@ -794,7 +844,7 @@ window.__ModuleLoader__.load({
       const ui = store.state.ui
 
       function onStart(event) {
-        if (!isEditable(event.target)) return
+        if (!isTypingTarget(event.target)) return
         composing = { at: window.performance.now(), backs: 0, el: event.target, trace: [], shrinks: 0, lastData: '' }
         compStart = composing.at
         ui.live = { text: '', at: Date.now(), backs: 0 }
@@ -821,7 +871,7 @@ window.__ModuleLoader__.load({
       }
       function onEnd(event) {
         if (!composing) return
-        if (!isEditable(event.target)) { composing = null; return }
+        if (!isTypingTarget(event.target)) { composing = null; return }
         const elapsed = window.performance.now() - composing.at
         const backs = composing.backs
         const trace = composing.trace.slice(0)
@@ -844,7 +894,7 @@ window.__ModuleLoader__.load({
         })
       }
       function onInput(event) {
-        if (!isEditable(event.target)) return
+        if (!isTypingTarget(event.target)) return
         if (event.isComposing) return
         if (Date.now() - lastCommitAt < 400) return
         const text = event.data || (event.target && event.target.value) || ''
@@ -871,10 +921,10 @@ window.__ModuleLoader__.load({
     const S = {
       panel: {
         width: '100%',
-        background: 'var(--dsw-alias-bg-layer-1)',
-        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-1, #ffffff)',
+        border: '1px solid var(--dsw-alias-border-l2, #cfd4da)',
         borderRadius: 12,
-        color: 'var(--dsw-alias-label-primary)',
+        color: 'var(--dsw-alias-label-primary, #1a1d21)',
         fontFamily: 'inherit',
         fontSize: 12,
         overflow: 'hidden',
@@ -902,9 +952,9 @@ window.__ModuleLoader__.load({
       },
       toolbarToggle: {
         appearance: 'none',
-        border: '1px solid var(--dsw-alias-border-l1)',
+        border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)',
         background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)',
+        color: 'var(--dsw-alias-label-secondary, #6b7280)',
         fontSize: 11.5,
         lineHeight: 1,
         padding: '4px 8px',
@@ -913,8 +963,8 @@ window.__ModuleLoader__.load({
         fontFamily: 'inherit',
       },
       toolbarToggleOn: {
-        borderColor: 'var(--dsw-alias-brand-primary)',
-        color: 'var(--dsw-alias-brand-primary)',
+        borderColor: 'var(--dsw-alias-brand-primary, #2b6cf6)',
+        color: 'var(--dsw-alias-brand-primary, #2b6cf6)',
       },
       slimBar: {
         display: 'flex',
@@ -923,43 +973,43 @@ window.__ModuleLoader__.load({
         width: '100%',
         marginBottom: 8,
         padding: '4px 12px',
-        background: 'var(--dsw-alias-bg-layer-1)',
-        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1, #ffffff)',
+        border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)',
         borderRadius: 8,
-        color: 'var(--dsw-alias-label-secondary)',
+        color: 'var(--dsw-alias-label-secondary, #6b7280)',
         fontSize: 11,
       },
-      slimTitle: { fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
+      slimTitle: { fontWeight: 600, color: 'var(--dsw-alias-label-primary, #1a1d21)' },
       header: {
         display: 'flex',
         alignItems: 'center',
         gap: 8,
         padding: '8px 10px',
-        borderBottom: '1px solid var(--dsw-alias-border-l1)',
+        borderBottom: '1px solid var(--dsw-alias-border-l1, #e3e6ea)',
         cursor: 'grab',
         touchAction: 'none',
         userSelect: 'none',
       },
-      grip: { color: 'var(--dsw-alias-label-secondary)', fontSize: 13, lineHeight: 1, letterSpacing: 1 },
+      grip: { color: 'var(--dsw-alias-label-secondary, #6b7280)', fontSize: 13, lineHeight: 1, letterSpacing: 1 },
       title: { fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' },
       spacer: { flex: '1 1 auto' },
-      sliderWrap: { display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--dsw-alias-label-secondary)' },
-      slider: { width: 90, accentColor: 'var(--dsw-alias-brand-primary)', cursor: 'pointer' },
+      sliderWrap: { display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--dsw-alias-label-secondary, #6b7280)' },
+      slider: { width: 90, accentColor: 'var(--dsw-alias-brand-primary, #2b6cf6)', cursor: 'pointer' },
       iconButton: {
         appearance: 'none', border: '1px solid transparent', background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)', fontSize: 11.5, lineHeight: 1,
+        color: 'var(--dsw-alias-label-secondary, #6b7280)', fontSize: 11.5, lineHeight: 1,
         padding: '4px 6px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
       },
-      iconOn: { color: 'var(--dsw-alias-brand-primary)' },
+      iconOn: { color: 'var(--dsw-alias-brand-primary, #2b6cf6)' },
       tab: {
         appearance: 'none', border: '1px solid transparent', background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)', fontSize: 11.5, lineHeight: 1,
+        color: 'var(--dsw-alias-label-secondary, #6b7280)', fontSize: 11.5, lineHeight: 1,
         padding: '5px 10px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
       },
       tabActive: {
-        background: 'var(--dsw-alias-bg-layer-2)',
-        borderColor: 'var(--dsw-alias-border-l1)',
-        color: 'var(--dsw-alias-label-primary)',
+        background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)',
+        borderColor: 'var(--dsw-alias-border-l1, #e3e6ea)',
+        color: 'var(--dsw-alias-label-primary, #1a1d21)',
       },
       body: { padding: '10px 12px 12px', overflowY: 'auto', overflowX: 'hidden', minHeight: 0, flex: '1 1 auto', userSelect: 'text', display: 'flex', flexDirection: 'column', gap: 8 },
       // flexShrink:0 —— 键盘永远按自身行高完整显示，不被正文的滚动区压扁
@@ -967,104 +1017,104 @@ window.__ModuleLoader__.load({
       key: {
         appearance: 'none', position: 'relative', padding: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--dsw-alias-bg-layer-2)',
-        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)',
+        border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)',
         borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
         fontFamily: 'inherit',
         transition: 'box-shadow 120ms ease, transform 120ms ease',
       },
       keyHot: {
-        borderColor: 'var(--dsw-alias-brand-primary)',
-        boxShadow: 'inset 0 0 0 1.5px var(--dsw-alias-brand-primary), 0 0 0 2px var(--dsw-alias-brand-primary)',
+        borderColor: 'var(--dsw-alias-brand-primary, #2b6cf6)',
+        boxShadow: 'inset 0 0 0 1.5px var(--dsw-alias-brand-primary, #2b6cf6), 0 0 0 2px var(--dsw-alias-brand-primary, #2b6cf6)',
         transform: 'translateY(-1px)',
       },
-      keyHover: { borderColor: 'var(--dsw-alias-brand-primary)' },
-      keyBad: { borderColor: 'var(--dsw-alias-state-error-primary)' },
+      keyHover: { borderColor: 'var(--dsw-alias-brand-primary, #2b6cf6)' },
+      keyBad: { borderColor: 'var(--dsw-alias-state-error-primary, #d64545)' },
       keyPredict: {
-        borderColor: 'var(--dsw-alias-label-primary)',
-        boxShadow: 'inset 0 0 0 1px var(--dsw-alias-label-primary)',
+        borderColor: 'var(--dsw-alias-label-primary, #1a1d21)',
+        boxShadow: 'inset 0 0 0 1px var(--dsw-alias-label-primary, #1a1d21)',
       },
       keyPredictStrong: {
-        borderColor: 'var(--dsw-alias-label-primary)',
-        boxShadow: '0 0 0 2px var(--dsw-alias-label-primary), inset 0 0 0 1px var(--dsw-alias-label-primary)',
+        borderColor: 'var(--dsw-alias-label-primary, #1a1d21)',
+        boxShadow: '0 0 0 2px var(--dsw-alias-label-primary, #1a1d21), inset 0 0 0 1px var(--dsw-alias-label-primary, #1a1d21)',
         transform: 'translateY(-1px)',
       },
       keyPredictChar: {
         position: 'absolute', top: 1, right: 3, fontWeight: 600,
-        color: 'var(--dsw-alias-label-primary)',
+        color: 'var(--dsw-alias-label-primary, #1a1d21)',
       },
       keyPredictCharLow: {
         position: 'absolute', bottom: 7, right: 3, fontWeight: 600,
-        color: 'var(--dsw-alias-label-primary)',
+        color: 'var(--dsw-alias-label-primary, #1a1d21)',
       },
-      keyLetter: { position: 'absolute', top: 1, left: 4, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' },
-      keyInitial: { position: 'absolute', top: 1, right: 3, color: 'var(--dsw-alias-brand-primary)' },
-      keyFinal: { textAlign: 'center', color: 'var(--dsw-alias-label-primary)', lineHeight: 1.1, wordBreak: 'break-word', marginTop: '0.2em' },
+      keyLetter: { position: 'absolute', top: 1, left: 4, fontWeight: 600, color: 'var(--dsw-alias-label-secondary, #6b7280)' },
+      keyInitial: { position: 'absolute', top: 1, right: 3, color: 'var(--dsw-alias-brand-primary, #2b6cf6)' },
+      keyFinal: { textAlign: 'center', color: 'var(--dsw-alias-label-primary, #1a1d21)', lineHeight: 1.1, wordBreak: 'break-word', marginTop: '0.2em' },
       heatBar: { position: 'absolute', left: 4, right: 4, bottom: 2, height: 3, borderRadius: 2 },
       hintToggle: {
         appearance: 'none', border: '1px solid transparent', background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)', fontSize: 10.5, padding: '3px 2px',
+        color: 'var(--dsw-alias-label-secondary, #6b7280)', fontSize: 10.5, padding: '3px 2px',
         cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
       },
-      hint: { fontSize: 10.5, lineHeight: 1.55, color: 'var(--dsw-alias-label-secondary)' },
-      hintStrong: { color: 'var(--dsw-alias-label-primary)' },
-      hintScheme: { fontSize: 9.5, color: 'var(--dsw-alias-label-secondary)', opacity: 0.75, marginTop: 1 },
+      hint: { fontSize: 10.5, lineHeight: 1.55, color: 'var(--dsw-alias-label-secondary, #6b7280)' },
+      hintStrong: { color: 'var(--dsw-alias-label-primary, #1a1d21)' },
+      hintScheme: { fontSize: 9.5, color: 'var(--dsw-alias-label-secondary, #6b7280)', opacity: 0.75, marginTop: 1 },
       schemeBar: {
         display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
-        marginBottom: 8, fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)',
+        marginBottom: 8, fontSize: 10.5, color: 'var(--dsw-alias-label-secondary, #6b7280)',
       },
       // 自绘下拉：原生 select 的弹层由系统绘制（白底黑字）且跟随不了主题，统一换掉
       picker: { position: 'relative', display: 'inline-flex' },
       pickerButton: {
         appearance: 'none', display: 'inline-flex', alignItems: 'center', gap: 5,
         border: '1px solid transparent', background: 'transparent',
-        color: 'var(--dsw-alias-label-primary)', fontSize: 13, fontWeight: 600,
+        color: 'var(--dsw-alias-label-primary, #1a1d21)', fontSize: 13, fontWeight: 600,
         padding: '3px 4px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
         lineHeight: 1.2, whiteSpace: 'nowrap',
       },
-      pickerButtonOpen: { background: 'var(--dsw-alias-bg-layer-2)', borderColor: 'var(--dsw-alias-border-l1)' },
+      pickerButtonOpen: { background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)', borderColor: 'var(--dsw-alias-border-l1, #e3e6ea)' },
       pickerButtonSmall: { fontSize: 10.5, fontWeight: 400, padding: '2px 5px' },
       pickerCaret: { fontSize: 8, opacity: 0.6, lineHeight: 1 },
       pickerList: {
         position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 60,
         minWidth: '100%', display: 'flex', flexDirection: 'column', gap: 1,
         padding: 4, borderRadius: 8,
-        background: 'var(--dsw-alias-bg-layer-1)',
-        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-1, #ffffff)',
+        border: '1px solid var(--dsw-alias-border-l2, #cfd4da)',
         boxShadow: '0 10px 28px rgba(0,0,0,0.22)',
       },
       pickerItem: {
         appearance: 'none', display: 'flex', alignItems: 'center', gap: 6,
         border: '1px solid transparent', background: 'transparent',
-        color: 'var(--dsw-alias-label-primary)', fontSize: 11.5,
+        color: 'var(--dsw-alias-label-primary, #1a1d21)', fontSize: 11.5,
         padding: '5px 8px', borderRadius: 6, cursor: 'pointer',
         fontFamily: 'inherit', textAlign: 'left', whiteSpace: 'nowrap',
       },
-      pickerItemOn: { color: 'var(--dsw-alias-brand-primary)', fontWeight: 600 },
+      pickerItemOn: { color: 'var(--dsw-alias-brand-primary, #2b6cf6)', fontWeight: 600 },
       pickerCheck: { width: 10, fontSize: 9, flex: '0 0 auto' },
       schemeAction: {
-        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)', fontSize: 10, padding: '2px 7px',
+        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)', background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary, #6b7280)', fontSize: 10, padding: '2px 7px',
         borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
       },
       drill: { display: 'flex', flexDirection: 'column', gap: 8 },
       poolRow: { display: 'flex', gap: 6, alignItems: 'center' },
       poolChip: {
-        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)', fontSize: 10.5, padding: '3px 8px',
+        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)', background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary, #6b7280)', fontSize: 10.5, padding: '3px 8px',
         borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
       },
       poolChipOn: {
-        borderColor: 'var(--dsw-alias-brand-primary)',
-        color: 'var(--dsw-alias-brand-primary)',
+        borderColor: 'var(--dsw-alias-brand-primary, #2b6cf6)',
+        color: 'var(--dsw-alias-brand-primary, #2b6cf6)',
       },
       drillPrompt: { display: 'flex', alignItems: 'baseline', gap: 10 },
       drillHan: { fontSize: 34, fontWeight: 600, lineHeight: 1.05 },
-      drillPinyin: { fontSize: 13, color: 'var(--dsw-alias-label-secondary)', letterSpacing: 0.4 },
+      drillPinyin: { fontSize: 13, color: 'var(--dsw-alias-label-secondary, #6b7280)', letterSpacing: 0.4 },
       customPanel: {
         display: 'flex', flexDirection: 'column', gap: 6,
-        border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8,
-        padding: '8px 10px', background: 'var(--dsw-alias-bg-layer-1)',
+        border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)', borderRadius: 8,
+        padding: '8px 10px', background: 'var(--dsw-alias-bg-layer-1, #ffffff)',
       },
       customHead: { display: 'flex', alignItems: 'baseline', gap: 8 },
       customGrid: {
@@ -1073,85 +1123,85 @@ window.__ModuleLoader__.load({
       },
       customRow: { display: 'flex', alignItems: 'flex-end', gap: 6, flexWrap: 'wrap', marginTop: 2 },
       customCell: { display: 'flex', flexDirection: 'column', gap: 2 },
-      customLabel: { fontSize: 9.5, color: 'var(--dsw-alias-label-secondary)' },
+      customLabel: { fontSize: 9.5, color: 'var(--dsw-alias-label-secondary, #6b7280)' },
       customInput: {
         width: 30, textAlign: 'center', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
-        border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 5,
-        background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-primary)',
+        border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)', borderRadius: 5,
+        background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)', color: 'var(--dsw-alias-label-primary, #1a1d21)',
         padding: '2px 0',
       },
       actionPrimary: {
-        borderColor: 'var(--dsw-alias-brand-primary)',
-        color: 'var(--dsw-alias-brand-primary)',
+        borderColor: 'var(--dsw-alias-brand-primary, #2b6cf6)',
+        color: 'var(--dsw-alias-brand-primary, #2b6cf6)',
       },
       actionDisabled: { opacity: 0.45, cursor: 'not-allowed' },
       pad: {
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 48,
-        borderRadius: 8, border: '1px dashed var(--dsw-alias-border-l2)',
-        background: 'var(--dsw-alias-bg-layer-2)', cursor: 'text', outline: 'none',
+        borderRadius: 8, border: '1px dashed var(--dsw-alias-border-l2, #cfd4da)',
+        background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)', cursor: 'text', outline: 'none',
       },
-      padFocused: { borderStyle: 'solid', borderColor: 'var(--dsw-alias-brand-primary)' },
+      padFocused: { borderStyle: 'solid', borderColor: 'var(--dsw-alias-brand-primary, #2b6cf6)' },
       slot: {
-        width: 34, height: 34, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1)',
-        background: 'var(--dsw-alias-bg-layer-1)', display: 'flex', alignItems: 'center',
+        width: 34, height: 34, borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)',
+        background: 'var(--dsw-alias-bg-layer-1, #ffffff)', display: 'flex', alignItems: 'center',
         justifyContent: 'center', fontSize: 16, fontWeight: 600,
       },
-      slotEmpty: { color: 'var(--dsw-alias-label-secondary)', fontWeight: 400 },
-      padHint: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)' },
-      revealed: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
+      slotEmpty: { color: 'var(--dsw-alias-label-secondary, #6b7280)', fontWeight: 400 },
+      padHint: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary, #6b7280)' },
+      revealed: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--dsw-alias-label-secondary, #6b7280)' },
       chip: {
         minWidth: 28, textAlign: 'center', padding: '5px 8px', borderRadius: 6,
-        border: '1px solid var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)',
+        border: '1px solid var(--dsw-alias-brand-primary, #2b6cf6)', color: 'var(--dsw-alias-brand-primary, #2b6cf6)',
         fontWeight: 600, fontSize: 13, letterSpacing: 1,
       },
-      chipBad: { borderColor: 'var(--dsw-alias-state-error-primary)', color: 'var(--dsw-alias-state-error-primary)' },
-      toggleRow: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer' },
+      chipBad: { borderColor: 'var(--dsw-alias-state-error-primary, #d64545)', color: 'var(--dsw-alias-state-error-primary, #d64545)' },
+      toggleRow: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--dsw-alias-label-secondary, #6b7280)', cursor: 'pointer' },
       result: { fontSize: 11.5, minHeight: 17, display: 'flex', alignItems: 'center', gap: 6 },
-      ok: { color: 'var(--dsw-alias-state-success-primary)' },
-      bad: { color: 'var(--dsw-alias-state-error-primary)' },
+      ok: { color: 'var(--dsw-alias-state-success-primary, #2e9e5b)' },
+      bad: { color: 'var(--dsw-alias-state-error-primary, #d64545)' },
       footer: { display: 'flex', alignItems: 'center', gap: 6 },
-      statsText: { flex: '1 1 auto', fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)' },
+      statsText: { flex: '1 1 auto', fontSize: 10.5, color: 'var(--dsw-alias-label-secondary, #6b7280)' },
       action: {
-        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)', fontSize: 11, padding: '4px 9px',
+        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)', background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary, #6b7280)', fontSize: 11, padding: '4px 9px',
         borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
       },
       sectionTitle: { fontSize: 11.5, fontWeight: 600 },
       weakRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 },
       weakKey: {
         width: 24, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        borderRadius: 5, background: 'var(--dsw-alias-bg-layer-2)',
-        border: '1px solid var(--dsw-alias-border-l1)', fontWeight: 600, fontSize: 11,
+        borderRadius: 5, background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)',
+        border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)', fontWeight: 600, fontSize: 11,
       },
-      barTrack: { flex: '1 1 auto', height: 6, borderRadius: 3, background: 'var(--dsw-alias-bg-layer-2)', overflow: 'hidden' },
+      barTrack: { flex: '1 1 auto', height: 6, borderRadius: 3, background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)', overflow: 'hidden' },
       barFill: { height: '100%', borderRadius: 3 },
-      weakMeta: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)', minWidth: 88, textAlign: 'right' },
+      weakMeta: { fontSize: 10, color: 'var(--dsw-alias-label-secondary, #6b7280)', minWidth: 88, textAlign: 'right' },
       charChip: {
         display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 7px', margin: '0 4px 4px 0',
-        borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1)', fontSize: 12,
+        borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)', fontSize: 12,
       },
-      charChipCode: { fontSize: 9.5, color: 'var(--dsw-alias-state-error-primary)', letterSpacing: 0.5 },
-      code: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', color: 'var(--dsw-alias-brand-primary)', letterSpacing: 1 },
-      echoT: { color: 'var(--dsw-alias-label-secondary)', minWidth: 54, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 10 },
-      wrongText: { fontSize: 11, color: 'var(--dsw-alias-label-primary)' },
-      empty: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 },
+      charChipCode: { fontSize: 9.5, color: 'var(--dsw-alias-state-error-primary, #d64545)', letterSpacing: 0.5 },
+      code: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', color: 'var(--dsw-alias-brand-primary, #2b6cf6)', letterSpacing: 1 },
+      echoT: { color: 'var(--dsw-alias-label-secondary, #6b7280)', minWidth: 54, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 10 },
+      wrongText: { fontSize: 11, color: 'var(--dsw-alias-label-primary, #1a1d21)' },
+      empty: { fontSize: 11, color: 'var(--dsw-alias-label-secondary, #6b7280)', lineHeight: 1.6 },
       // 记录页下半部：最近输入 / 输入法回显 / 卡壳过程 三栏并列，省竖向空间。
       // 列宽有下限 + 允许换行：窄面板自动折成两行，不会挤成省略号。
       colsWrap: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'stretch', minHeight: 0 },
       col: {
         flex: '1 1 150px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3,
         padding: '7px 8px', borderRadius: 8,
-        border: '1px solid var(--dsw-alias-border-l1)',
-        background: 'var(--dsw-alias-bg-layer-2)',
+        border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)',
+        background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)',
         maxHeight: 168, overflowY: 'auto',
       },
-      colHead: { fontSize: 10.5, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: 1 },
+      colHead: { fontSize: 10.5, fontWeight: 600, color: 'var(--dsw-alias-label-secondary, #6b7280)', marginBottom: 1 },
       colRow: { display: 'flex', alignItems: 'baseline', gap: 5, fontSize: 11, minWidth: 0 },
       colWord: { fontSize: 12, fontWeight: 600, flex: '0 0 auto' },
       colCode: { flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-      colMeta: { marginLeft: 'auto', fontSize: 9.5, color: 'var(--dsw-alias-label-secondary)', flex: '0 0 auto' },
+      colMeta: { marginLeft: 'auto', fontSize: 9.5, color: 'var(--dsw-alias-label-secondary, #6b7280)', flex: '0 0 auto' },
       gripCorner: { position: 'absolute', right: 0, bottom: 0, width: 16, height: 16, cursor: 'nwse-resize', touchAction: 'none', zIndex: 2 },
-      gripLine: { position: 'absolute', right: 3, bottom: 3, width: 8, height: 8, borderRight: '2px solid var(--dsw-alias-border-l2)', borderBottom: '2px solid var(--dsw-alias-border-l2)', borderRadius: 1 },
+      gripLine: { position: 'absolute', right: 3, bottom: 3, width: 8, height: 8, borderRight: '2px solid var(--dsw-alias-border-l2, #cfd4da)', borderBottom: '2px solid var(--dsw-alias-border-l2, #cfd4da)', borderRadius: 1 },
     }
 
     /* ================= 组件 ================= */
@@ -1203,7 +1253,7 @@ window.__ModuleLoader__.load({
         {},
         S.keyFinal,
         { fontSize: Math.max(9, Math.min(30, size.w * 0.24)) },
-        props.level === 'bad' ? { color: 'var(--dsw-alias-state-error-primary)', fontWeight: 600 } : null,
+        props.level === 'bad' ? { color: 'var(--dsw-alias-state-error-primary, #d64545)', fontWeight: 600 } : null,
       )
       return h(
         'button',
@@ -1683,7 +1733,7 @@ window.__ModuleLoader__.load({
           h('input', {
             type: 'checkbox',
             checked: prefs.autoHint,
-            style: { accentColor: 'var(--dsw-alias-brand-primary)' },
+            style: { accentColor: 'var(--dsw-alias-brand-primary, #2b6cf6)' },
             onChange: function (event) {
               prefs.autoHint = event.target.checked
               store.touch()
@@ -1806,14 +1856,14 @@ window.__ModuleLoader__.load({
           h('span', { style: S.sectionTitle }, t('progress').replace('{n}', total).replace('{goal}', goal)),
           h('span', { style: Object.assign({}, S.empty, { marginLeft: 'auto', fontSize: 9.5 }) }, t('dataNote'))),
         h('div', { style: S.barTrack },
-          h('div', { style: Object.assign({}, S.barFill, { width: Math.max(3, pct) + '%', background: 'var(--dsw-alias-brand-primary)' }) })),
+          h('div', { style: Object.assign({}, S.barFill, { width: Math.max(3, pct) + '%', background: 'var(--dsw-alias-brand-primary, #2b6cf6)' }) })),
         // 弱键与常按错键并排，同样为了省高度；窄面板自动折行
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' } },
           h('div', { style: { flex: '1 1 180px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 } },
             h('div', { style: S.sectionTitle }, t('weakTitle')),
             ranked.length
               ? ranked.map(function (row) {
-                  const color = heatColor(row.weakness) || 'var(--dsw-alias-state-idle-primary)'
+                  const color = heatColor(row.weakness) || 'var(--dsw-alias-state-idle-primary, #9aa3ad)'
                   const value = Math.round((row.weakness === null ? 0 : row.weakness) * 100)
                   return h('div', { key: row.key, style: S.weakRow },
                     h('span', { style: S.weakKey }, row.key.toUpperCase()),
@@ -2098,6 +2148,8 @@ window.__ModuleLoader__.load({
         style: Object.assign({}, S.panel, { width: width, margin: '0 auto 8px' }),
         role: 'region',
         'aria-label': t('title'),
+        // 标记为插件自身的 UI：里面的输入框（改键位）不算用户打字
+        [SELF_ATTR]: 'dock',
         onMouseEnter: function () { setHovered(true) },
         onMouseLeave: function () { setHovered(false) },
       },
@@ -2228,6 +2280,7 @@ window.__ModuleLoader__.load({
         style: Object.assign({}, S.panel, S.panelFloat, { left: pos.x, top: pos.y, width: width, opacity: prefs.opacity }),
         role: 'dialog',
         'aria-label': t('title'),
+        [SELF_ATTR]: 'float',
         onMouseEnter: function () { setHovered(true) },
         onMouseLeave: function () { setHovered(false) },
       },
