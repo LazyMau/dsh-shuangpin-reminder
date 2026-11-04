@@ -2623,7 +2623,7 @@ window.__ModuleLoader__.load({
         },
         title: active ? t('kbHide') : t('kbShow'),
         'aria-pressed': active,
-      }, '拼')
+      }, '双拼')
     }
 
     function clampWidth(value, left) {

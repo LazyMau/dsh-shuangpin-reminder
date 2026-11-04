@@ -212,6 +212,12 @@ if (variant === 'stats') {
   console.log('record columns:', cols.length, '✓')
 }
 
+// 工具行开关的文字应为「双拼」，不是单个「拼」
+if (variant === 'map' || variant === 'float') {
+  if (!joined.includes('双拼')) throw new Error('工具行开关应显示「双拼」')
+  if (/(^|\| )拼( \||$)/.test(joined)) throw new Error('工具行开关仍是单字「拼」')
+}
+
 // 面板高度封顶，页签行不被推出视野
 const panelStyle = styleOf.find((s) => s && s.maxHeight === 'calc(100vh - 200px)')
 if ((variant === 'map' || variant === 'stats' || variant === 'drill') && !panelStyle) {
