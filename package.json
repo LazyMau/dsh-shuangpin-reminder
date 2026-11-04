@@ -1,0 +1,28 @@
+{
+  "name": "@local/xiaohe-shuangpin-reminder",
+  "version": "1.4.2",
+  "private": true,
+  "type": "module",
+  "description": "可拖动、可拉伸的小鹤双拼悬浮面板：自动收集打字速度与卡顿，给键位加热力标记，卡住时亮键，并把卡过的字做成练习。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}

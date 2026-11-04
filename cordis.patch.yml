@@ -1,0 +1,3 @@
+- insert:
+    - id: xiaohe-shuangpin-reminder
+      name: '@local/xiaohe-shuangpin-reminder'
