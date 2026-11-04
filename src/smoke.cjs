@@ -139,7 +139,10 @@ if (variant === 'capture') {
   doc.dispatch('compositionend', { target, data: '情' })
   const raw = storage.get('dsh.shuangpin-reminder.stats.v2')
   if (!raw) throw new Error('stats were not persisted')
-  const stats = JSON.parse(raw)
+  const store = JSON.parse(raw)
+  // v3 起统计按方案分桶；测试用的是默认方案 flypy
+  const stats = store.buckets ? store.buckets[store.active] : store
+  if (!stats) throw new Error('stats bucket missing for active scheme: ' + store.active)
   const codes = stats.events[0].codes
   console.log('captured codes:', JSON.stringify(codes))
   console.log('stall trace:', JSON.stringify(stats.stalls[0] && stats.stalls[0].seq))
@@ -210,6 +213,14 @@ if (variant === 'stats') {
   const wrap = styleOf.filter((s) => s && s.display === 'flex' && s.gap === 10 && s.minHeight === 0)
   if (!wrap.length) throw new Error('缺少三栏并列容器')
   console.log('record columns:', cols.length, '✓')
+}
+
+// 记录页要标出这份记录属于哪个方案（统计按方案分开存）
+if (variant === 'stats') {
+  const tag = styleOf.filter((s) => s && s.whiteSpace === 'nowrap' && s.borderRadius === 999)
+  if (!tag.length) throw new Error('记录页缺少方案标记')
+  if (!joined.includes('小鹤双拼')) throw new Error('记录页未显示当前方案名，实际: ' + joined.slice(0, 120))
+  console.log('record scheme tag ✓')
 }
 
 // 工具行开关的文字应为「双拼」，不是单个「拼」

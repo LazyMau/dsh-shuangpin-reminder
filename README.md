@@ -64,6 +64,9 @@ node src/derive-check.cjs <rime schema 目录> --check   # 与 src/schemes.cjs �
 - 单字耗时 > 你近期均值的 1.5 倍 + 120ms，或退格 ≥ 2 次 → 记为一次「卡」。
 - 字 → 拼音 → 双拼两键（内置 3755 个常用字的表），于是「哪些键常出现在卡顿的字里」就出来了。
 - 「记录」页显示：收集进度、最容易卡的键与常按错的键（并排）、卡过的字，以及**最近输入 / 输入法回显采样 / 卡壳过程**三栏并列。面板高度有上限、只滚正文，所以记录页再长也能随时点回「键位」页。
+- **记录按方案分开存**：同一套键位在不同双拼方案下含义不同（比如 `k` 在小鹤是 `ei`、在自然码是 `iao`），
+  混在一起的热力图没有意义。所以在标题栏切换方案后，进度、弱键、错键、卡过的字、最近输入都只算当前方案；
+  换回来时原来的记录还在。记录页标题旁的小标签标出这份数据属于哪个方案。
 - 「练习」页可以切到 **我的错字**，只练你卡过的字。
 
 ## 隐私
@@ -83,7 +86,7 @@ node src/derive-check.cjs <rime schema 目录> --check   # 与 src/schemes.cjs �
 | 位置 | 内容 | 说明 |
 |------|------|------|
 | `localStorage` `dsh.shuangpin-reminder.prefs.v4` | 位置、宽度、透明度、页签、方案、自定义键位 | 纯偏好 |
-| `localStorage` `dsh.shuangpin-reminder.stats.v2` | 逐字/逐键统计、最近 30 条输入、回显采样、卡壳过程 | 完整数据，仅此端口可见 |
+| `localStorage` `dsh.shuangpin-reminder.stats.v2` | **按方案分桶**的逐字/逐键统计、最近 30 条输入、回显采样、卡壳过程 | 完整数据，仅此端口可见 |
 | cookie `dsh.shuangpin.mirror.*` | **仅聚合计数**：键次数、错键次数、进度基数 | 见下 |
 
 cookie 镜像的存在理由：GUI 端口每次启动会变，而 `localStorage` 按端口隔离、
@@ -148,6 +151,7 @@ src/smoke-picker.cjs    自绘下拉交互测试（展开/选中/收起）
 src/smoke-height.cjs    新会话高度回归（面板/键盘不被压扁）
 src/smoke-mirror.cjs    cookie 镜像行为（不含原文 / 可恢复 / 旧数据清除）
 src/smoke-migrate.cjs   旧存储键迁移（不丢偏好与统计）
+src/smoke-per-scheme.cjs 记录按方案隔离（切方案不串数据）
 src/mirror-size.cjs     镜像体积与隐私体检（估算 cookie 条数与上限）
 src/smoke-proto.cjs     恶意统计数据不污染原型
 src/add-fallbacks.cjs   给主题变量补兜底色（幂等，人工执行）
@@ -171,6 +175,7 @@ node src/smoke-picker.cjs .       # 下拉展开/选中/收起
 node src/smoke-height.cjs .       # 面板/键盘不可被压扁
 node src/smoke-mirror.cjs .       # cookie 镜像不含输入原文、可跨端口恢复
 node src/smoke-migrate.cjs .      # 旧存储键迁移不丢数据
+node src/smoke-per-scheme.cjs .   # 记录按方案隔离
 node src/mirror-size.cjs          # 镜像体积与隐私体检
 node src/smoke-proto.cjs .        # 恶意统计数据不污染原型
 node src/layout-check.cjs         # 记录页三栏布局估算

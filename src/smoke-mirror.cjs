@@ -140,7 +140,7 @@ const sampleStats = {
   console.log('cookie 条数:', names.length, '| 最大单条:', biggest, '字节 | 不含输入原文 ✓')
 }
 
-/* ---------- 2. 能读回聚合计数 ---------- */
+/* ---------- 2. 能读回聚合计数，且归到正确的方案下 ---------- */
 {
   const first = mount(sampleStats)
   first.flush()
@@ -149,10 +149,15 @@ const sampleStats = {
   const second = mount(null, undefined, before)
   const restored = second.storage.get('dsh.shuangpin-reminder.stats.v2')
   ok(restored, '换端口后未从镜像恢复统计')
-  const parsed = JSON.parse(restored)
+  const store = JSON.parse(restored)
+  ok(store.buckets, '恢复后的统计应按方案分桶')
+  const parsed = store.buckets[store.active]
+  ok(parsed, '恢复后没有对应方案的桶: ' + store.active)
+  // 镜像要记住是哪个方案的数据，不能塞进别的方案
+  ok(store.active === 'flypy', '恢复的方案不对: ' + store.active)
   ok(parsed.keys && parsed.keys.q && parsed.keys.q.n === 5, '恢复后的键计数不正确')
   ok(parsed.wrong && parsed.wrong['k|b'] === 3, '恢复后的错键计数不正确')
-  console.log('换端口恢复 keys.q.n =', parsed.keys.q.n, '| wrong =', JSON.stringify(parsed.wrong), '✓')
+  console.log('换端口恢复到方案', store.active, '| keys.q.n =', parsed.keys.q.n, '| wrong =', JSON.stringify(parsed.wrong), '✓')
 }
 
 /* ---------- 3. 旧格式（含原文）会被重写清掉 ---------- */

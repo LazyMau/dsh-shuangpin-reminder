@@ -88,7 +88,13 @@ function mount(seed) {
   const { storage } = mount({ [OLD_PREF]: oldPrefs, [OLD_STAT]: oldStats })
 
   ok(storage.get(NEW_PREF) === oldPrefs, '旧偏好未迁移到新键')
-  ok(storage.get(NEW_STAT) === oldStats, '旧统计未迁移到新键')
+  // 统计现在按方案分桶，值会被重新组织，所以比对语义而不是原文
+  const statRaw = storage.get(NEW_STAT)
+  ok(statRaw, '旧统计未迁移到新键')
+  const statStore = JSON.parse(statRaw)
+  const bucket = statStore.buckets ? statStore.buckets[statStore.active] : statStore
+  ok(bucket && bucket.keys && bucket.keys.q && bucket.keys.q.n === 7, '旧统计迁移后键计数丢了')
+  ok(bucket.base === 420, '旧统计迁移后 base 丢了')
   console.log('旧键 → 新键迁移 ✓')
 }
 
@@ -102,7 +108,9 @@ function mount(seed) {
     [OLD_STAT]: JSON.stringify({ v: 2, keys: { q: { n: 9, bad: 9 } }, wrong: {}, base: 420 }),
   })
   ok(storage.get(NEW_PREF) === newPrefs, '新键数据被旧键覆盖了')
-  ok(JSON.parse(storage.get(NEW_STAT)).keys.z.n === 1, '新统计被旧统计覆盖了')
+  const newStore = JSON.parse(storage.get(NEW_STAT))
+  const newBucket = newStore.buckets ? newStore.buckets[newStore.active] : newStore
+  ok(newBucket.keys.z.n === 1, '新统计被旧统计覆盖了')
   console.log('新键优先、不被旧键覆盖 ✓')
 }
 

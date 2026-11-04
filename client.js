@@ -549,6 +549,7 @@ window.__ModuleLoader__.load({
       slow: '慢',
       keyTimes: '{n} 次 · 卡 {bad} 次',
       dataNote: '只存在本机',
+      recordsFor: '记录按方案分开存，这里只算当前方案',
       schemeLabel: '方案',
       schemeCustom: '自定义…',
       customEdit: '改键位',
@@ -610,6 +611,7 @@ window.__ModuleLoader__.load({
       slow: 'slow',
       keyTimes: '{n} times · {bad} stalls',
       dataNote: 'local only',
+      recordsFor: 'Records are kept per scheme; only the current one is counted here',
       schemeLabel: 'Scheme',
       schemeCustom: 'Custom…',
       customEdit: 'Edit keys',
@@ -762,6 +764,18 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * 镜像的完整内容：统计分方案存，所以必须带上方案，否则换端口恢复时
+     * 会把某个方案的数据塞进另一个方案下。只镜像当前方案那一桶，控制体积。
+     */
+    function mirrorPayload(statsStore, bucketId) {
+      return {
+        v: 3,
+        active: bucketId,
+        stats: slimForMirror(statsStore.buckets[bucketId] || normalizeStats(null)),
+      }
+    }
+
     const DEFAULT_PREFS = {
       open: false, surface: 'dock', x: null, y: null, w: 520, opacity: 0.95, locked: false,
       tab: 'map', autoHint: true, hints: false, pool: 'common',
@@ -771,6 +785,31 @@ window.__ModuleLoader__.load({
     }
     const MIN_W = 340
     const MAX_W = 1720
+
+    /** 把任意历史形态的统计读成 { v, active, buckets }；每个方案一个桶 */
+    function normalizeStatsStore(raw, activeId) {
+      const out = { v: 3, active: activeId, buckets: {} }
+      if (!raw || typeof raw !== 'object') return out
+      if (raw.buckets && typeof raw.buckets === 'object') {
+        Object.keys(raw.buckets).forEach(function (id) {
+          if (!id) return
+          out.buckets[id] = normalizeStats(raw.buckets[id])
+        })
+        if (typeof raw.active === 'string' && raw.active) out.active = raw.active
+        return out
+      }
+      // v2 及更早：只有一份全局统计。当时用的就是 prefs.scheme，归到那个方案下
+      if (raw.chars || raw.keys || raw.events || raw.base) {
+        out.buckets[activeId] = normalizeStats(raw)
+      }
+      return out
+    }
+
+    /** 方案 id → 统计桶 id（自定义键位共用一个桶） */
+    function schemeBucketId(prefs) {
+      const id = prefs && prefs.scheme
+      return typeof id === 'string' && id ? id : 'flypy'
+    }
 
     function normalizeStats(raw) {
       const out = {
@@ -811,25 +850,49 @@ window.__ModuleLoader__.load({
       if (!storedStats) {
         const mirror = readMirror()
         if (mirror && mirror.stats && typeof mirror.stats === 'object') {
-          saveJSON(STAT_KEY, mirror.stats)
-          storedStats = mirror.stats
+          // 老镜像没有 active：当时是全局一份，按当前方案归档
+          const activeId = typeof mirror.active === 'string' && mirror.active
+            ? mirror.active
+            : schemeBucketId(Object.assign({}, DEFAULT_PREFS, storedPrefs || {}))
+          const restored = { v: 3, active: activeId, buckets: {} }
+          restored.buckets[activeId] = mirror.stats
+          saveJSON(STAT_KEY, restored)
+          storedStats = restored
         }
       }
       // 旧版本的镜像里带有用户输入原文（events/echo/stalls/lastChar）。
-      // 升级后立刻重写一次镜像，把历史残留清掉。
-      if (readMirrorLegacyLeftover()) writeMirror({ stats: slimForMirror(normalizeStats(storedStats)) })
       const prefs = Object.assign({}, DEFAULT_PREFS, storedPrefs || {})
+      const bucketId = schemeBucketId(prefs)
+      const statsStore = normalizeStatsStore(storedStats, bucketId)
+      if (!statsStore.buckets[bucketId]) statsStore.buckets[bucketId] = normalizeStats(null)
+      statsStore.active = bucketId
+      // 旧格式（扁平统计）迁移成分桶结构后立刻落盘，
+      // 否则下次启动还要再迁一次，中途崩溃会丢数据
+      if (storedStats && !storedStats.buckets) saveJSON(STAT_KEY, statsStore)
+      // 升级后立刻重写一次镜像，把旧格式（含用户输入原文、无方案信息）清掉
+      if (readMirrorLegacyLeftover()) writeMirror(mirrorPayload(statsStore, bucketId))
       const state = {
         prefs: prefs,
-        stats: normalizeStats(storedStats),
+        // 统计按方案分桶：state.stats 始终指向「当前方案」那一桶，
+        // 这样所有读取点都不用改，切换方案时记录也跟着切换
+        statsStore: statsStore,
         ui: { live: null, anchor: null, customOpen: false },
       }
+      Object.defineProperty(state, 'stats', {
+        enumerable: true,
+        get: function () {
+          const id = schemeBucketId(state.prefs)
+          if (!statsStore.buckets[id]) statsStore.buckets[id] = normalizeStats(null)
+          statsStore.active = id
+          return statsStore.buckets[id]
+        },
+      })
       const listeners = new Set()
       let saveTimer = null
       function save() {
         saveJSON(PREF_KEY, state.prefs)
-        saveJSON(STAT_KEY, state.stats)
-        writeMirror({ stats: slimForMirror(state.stats) })
+        saveJSON(STAT_KEY, statsStore)
+        writeMirror(mirrorPayload(statsStore, schemeBucketId(state.prefs)))
       }
       function notify() {
         listeners.forEach(function (fn) { fn() })
@@ -1073,6 +1136,14 @@ window.__ModuleLoader__.load({
       pruneChars(st.chars)
       st.rev = (st.rev || 0) + 1
       store.touch()
+    }
+
+    /** 当前方案的显示名，用于「记录属于哪个方案」的标记 */
+    function schemeLabelOf(prefs, t) {
+      const id = schemeBucketId(prefs)
+      if (id === 'custom') return t('schemeCustom').replace(/…$/, '')
+      const built = SCHEMES[id]
+      return built ? built.name : id
     }
 
     /** 每个键的 { n, bad }：真实输入按字累积 + 练习按次累积 */
@@ -1528,6 +1599,13 @@ window.__ModuleLoader__.load({
         borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
       },
       sectionTitle: { fontSize: 11.5, fontWeight: 600 },
+      schemeTag: {
+        fontSize: 9.5, padding: '1px 6px', borderRadius: 999,
+        color: 'var(--dsw-alias-label-secondary, #6b7280)',
+        background: 'var(--dsw-alias-bg-layer-2, #f2f4f7)',
+        border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)',
+        whiteSpace: 'nowrap',
+      },
       weakRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 },
       weakKey: {
         width: 24, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -2215,6 +2293,8 @@ window.__ModuleLoader__.load({
       return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 9 } },
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8 } },
           h('span', { style: S.sectionTitle }, t('progress').replace('{n}', total).replace('{goal}', goal)),
+          // 记录按方案分开存：标出这一份属于哪个方案，换方案时不会看错
+          h('span', { style: S.schemeTag, title: t('recordsFor') }, schemeLabelOf(prefs, t)),
           h('span', { style: Object.assign({}, S.empty, { marginLeft: 'auto', fontSize: 9.5 }) }, t('dataNote'))),
         h('div', { style: S.barTrack },
           h('div', { style: Object.assign({}, S.barFill, { width: Math.max(3, pct) + '%', background: 'var(--dsw-alias-brand-primary, #2b6cf6)' }) })),
