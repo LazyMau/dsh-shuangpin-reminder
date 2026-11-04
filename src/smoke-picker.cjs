@@ -97,7 +97,7 @@ function textsOf(node, out) {
 
 function mount(prefs) {
   const storage = new Map()
-  storage.set('dsh.xiaohe-shuangpin.prefs.v4', JSON.stringify(prefs))
+  storage.set('dsh.shuangpin-reminder.prefs.v4', JSON.stringify(prefs))
   const sandbox = {
     console,
     require: () => React,

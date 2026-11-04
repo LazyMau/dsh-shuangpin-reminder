@@ -42,7 +42,7 @@ const React = {
 
 const storage = new Map()
 if (variant === 'stats') {
-  storage.set('dsh.xiaohe-shuangpin.stats.v2', JSON.stringify({
+  storage.set('dsh.shuangpin-reminder.stats.v2', JSON.stringify({
     v: 2, rev: 3, base: 420,
     chars: {
       '学': { n: 4, ms: 2100, bad: 2, at: 5 },
@@ -120,9 +120,9 @@ if (!captured.length) throw new Error('slot registration missing')
 const dockReg = captured.find((c) => c.options.name === 'conversation.input.dock')
 const floatReg = captured.find((c) => c.options.name === 'shell.overlay')
 const toggleReg = captured.find((c) => c.options.name === 'conversation.input.right')
-if (!dockReg || dockReg.options.id !== 'xiaohe-shuangpin') throw new Error('dock registration missing')
-if (!floatReg || floatReg.options.id !== 'xiaohe-shuangpin-float') throw new Error('float registration missing')
-if (!toggleReg || toggleReg.options.id !== 'xiaohe-shuangpin-toggle') throw new Error('toggle registration missing')
+if (!dockReg || dockReg.options.id !== 'shuangpin-reminder') throw new Error('dock registration missing')
+if (!floatReg || floatReg.options.id !== 'shuangpin-reminder-float') throw new Error('float registration missing')
+if (!toggleReg || toggleReg.options.id !== 'shuangpin-reminder-toggle') throw new Error('toggle registration missing')
 
 if (variant === 'capture') {
   const target = {
@@ -137,7 +137,7 @@ if (variant === 'capture') {
   doc.dispatch('compositionupdate', { target, data: 'qi' })
   doc.dispatch('compositionupdate', { target, data: 'qing' })
   doc.dispatch('compositionend', { target, data: '情' })
-  const raw = storage.get('dsh.xiaohe-shuangpin.stats.v2')
+  const raw = storage.get('dsh.shuangpin-reminder.stats.v2')
   if (!raw) throw new Error('stats were not persisted')
   const stats = JSON.parse(raw)
   const codes = stats.events[0].codes

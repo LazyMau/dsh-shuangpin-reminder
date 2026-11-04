@@ -339,13 +339,16 @@ if (typeof module === 'object' && module.exports) module.exports = SchemeLib
 
 
 window.__ModuleLoader__.load({
-  id: '@local/xiaohe-shuangpin-reminder',
+  id: '@local/shuangpin-reminder',
   factory(require) {
     const React = require('react')
     const h = React.createElement
-    const NS = 'xiaohe-shuangpin'
-    const PREF_KEY = 'dsh.xiaohe-shuangpin.prefs.v4'
-    const STAT_KEY = 'dsh.xiaohe-shuangpin.stats.v2'
+    const NS = 'shuangpin-reminder'
+    const PREF_KEY = 'dsh.shuangpin-reminder.prefs.v4'
+    const STAT_KEY = 'dsh.shuangpin-reminder.stats.v2'
+    // 旧包名时期写入的键：首次启动时迁移一次，避免升级丢数据
+    const LEGACY_PREF_KEY = 'dsh.xiaohe-shuangpin.prefs.v4'
+    const LEGACY_STAT_KEY = 'dsh.xiaohe-shuangpin.stats.v2'
 
     /* ================= 双拼方案（数据层见 src/schemes.cjs，构建时内联） ================= */
     const FINAL_ORDER = SchemeLib.FINAL_ORDER
@@ -646,7 +649,8 @@ window.__ModuleLoader__.load({
     /* ---------- 跨端口兜底：localStorage 按「协议+主机+端口」隔离，而 GUI 端口每次启动会变。
        把**聚合统计**镜像到 cookie（cookie 不区分端口），换端口首次启动时恢复。
        注意：镜像只放计数，不放用户输入原文，详见 slimForMirror。 ---------- */
-    const MIRROR_BASE = 'dsh.xiaohe.mirror.'
+    const MIRROR_BASE = 'dsh.shuangpin.mirror.'
+    const MIRROR_BASE_LEGACY = 'dsh.xiaohe.mirror.'
     const MIRROR_CHUNK = 3500
     const MIRROR_MAX_CHUNKS = 4
     let mirrorChunks = 0
@@ -686,8 +690,12 @@ window.__ModuleLoader__.load({
           const eq = piece.indexOf('=')
           if (eq < 0) return
           const name = piece.slice(0, eq).trim()
-          if (name.indexOf(MIRROR_BASE) !== 0) return
-          const index = Number(name.slice(MIRROR_BASE.length))
+          // 新键优先；旧包名时期的键也认，迁移后由 wipeMirror 清掉
+          const base = name.indexOf(MIRROR_BASE) === 0
+            ? MIRROR_BASE
+            : (name.indexOf(MIRROR_BASE_LEGACY) === 0 ? MIRROR_BASE_LEGACY : null)
+          if (!base) return
+          const index = Number(name.slice(base.length))
           if (!Number.isInteger(index) || index < 0) return
           parts[index] = decodeURIComponent(piece.slice(eq + 1))
         })
@@ -782,7 +790,22 @@ window.__ModuleLoader__.load({
       return out
     }
 
+    /** 从旧包名的存储键迁移一次；新键已有数据时不动 */
+    function migrateLegacyKeys() {
+      try {
+        if (!window.localStorage.getItem(PREF_KEY)) {
+          const old = window.localStorage.getItem(LEGACY_PREF_KEY)
+          if (old) window.localStorage.setItem(PREF_KEY, old)
+        }
+        if (!window.localStorage.getItem(STAT_KEY)) {
+          const old = window.localStorage.getItem(LEGACY_STAT_KEY)
+          if (old) window.localStorage.setItem(STAT_KEY, old)
+        }
+      } catch (error) { /* 隐私模式：忽略 */ }
+    }
+
     function createStore() {
+      migrateLegacyKeys()
       let storedPrefs = loadJSON(PREF_KEY, null)
       let storedStats = loadJSON(STAT_KEY, null)
       if (!storedStats) {
@@ -1148,7 +1171,7 @@ window.__ModuleLoader__.load({
 
     /* ================= 输入捕获 ================= */
     /** 插件自身面板的标记：用来把「编辑键位」这类输入排除在打字统计之外 */
-    const SELF_ATTR = 'data-xiaohe-ui'
+    const SELF_ATTR = 'data-shuangpin-ui'
 
     function inSelfUI(el) {
       try {
@@ -2748,8 +2771,8 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
-        ctx.effect(function () { return ctx.locale.register(NS, 'zh', ZH) }, 'xiaohe-shuangpin: zh')
-        ctx.effect(function () { return ctx.locale.register(NS, 'en', EN) }, 'xiaohe-shuangpin: en')
+        ctx.effect(function () { return ctx.locale.register(NS, 'zh', ZH) }, 'shuangpin-reminder: zh')
+        ctx.effect(function () { return ctx.locale.register(NS, 'en', EN) }, 'shuangpin-reminder: en')
 
         const bound = ctx.locale.bind(NS)
         function t(key) {
@@ -2763,7 +2786,7 @@ window.__ModuleLoader__.load({
         }
 
         const store = createStore()
-        ctx.effect(function () { return installTypingCapture(store) }, 'xiaohe-shuangpin: typing capture')
+        ctx.effect(function () { return installTypingCapture(store) }, 'shuangpin-reminder: typing capture')
         ctx.effect(function () {
           function flush() { store.save() }
           window.addEventListener('pagehide', flush)
@@ -2771,23 +2794,23 @@ window.__ModuleLoader__.load({
             window.removeEventListener('pagehide', flush)
             store.save()
           }
-        }, 'xiaohe-shuangpin: persistence')
+        }, 'shuangpin-reminder: persistence')
 
         ctx.slots.inject('conversation.input.dock', function () {
           return ctx.slots.register(
-            { name: 'conversation.input.dock', id: 'xiaohe-shuangpin', order: 2 },
+            { name: 'conversation.input.dock', id: 'shuangpin-reminder', order: 2 },
             function () { return h(DockShell, { store: store, t: t }) },
           )
         })
         ctx.slots.inject('conversation.input.right', function () {
           return ctx.slots.register(
-            { name: 'conversation.input.right', id: 'xiaohe-shuangpin-toggle', order: 5 },
+            { name: 'conversation.input.right', id: 'shuangpin-reminder-toggle', order: 5 },
             function () { return h(ToolbarToggle, { store: store, t: t }) },
           )
         })
         ctx.slots.inject('shell.overlay', function () {
           return ctx.slots.register(
-            { name: 'shell.overlay', id: 'xiaohe-shuangpin-float', order: 4 },
+            { name: 'shell.overlay', id: 'shuangpin-reminder-float', order: 4 },
             function () { return h(FloatShell, { store: store, t: t }) },
           )
         })

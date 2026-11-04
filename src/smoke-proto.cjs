@@ -22,8 +22,8 @@ const noop = () => {}
 
 function mount(rawStats) {
   const storage = new Map()
-  storage.set('dsh.xiaohe-shuangpin.prefs.v4', JSON.stringify({ open: true, surface: 'dock' }))
-  if (rawStats) storage.set('dsh.xiaohe-shuangpin.stats.v2', rawStats)
+  storage.set('dsh.shuangpin-reminder.prefs.v4', JSON.stringify({ open: true, surface: 'dock' }))
+  if (rawStats) storage.set('dsh.shuangpin-reminder.stats.v2', rawStats)
   const cookieJar = new Map()
   const doc = {
     get cookie() { return [...cookieJar.entries()].map(([k, v]) => k + '=' + v).join('; ') },

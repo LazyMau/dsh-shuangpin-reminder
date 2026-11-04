@@ -25,7 +25,7 @@ function num(re, label) {
 }
 const MIRROR_CHUNK = num(/MIRROR_CHUNK = (\d+)/, '分块大小')
 const MIRROR_MAX_CHUNKS = num(/MIRROR_MAX_CHUNKS = (\d+)/, '分块上限')
-const NAME_LEN = 'dsh.xiaohe.mirror.0'.length
+const NAME_LEN = 'dsh.shuangpin.mirror.0'.length
 
 /* 真实 slimForMirror 的字段集 */
 const slimMatch = src.match(/function slimForMirror\(stats\) \{[\s\S]*?\n    \}/)

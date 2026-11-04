@@ -50,9 +50,9 @@ function mount(stats, extraStats, presetCookies) {
   // 模拟「换端口」：先把上个端口写下的镜像 cookie 塞进来，再挂载
   if (presetCookies) for (const [k, v] of presetCookies) jar.set(k, v)
   const storage = new Map()
-  storage.set('dsh.xiaohe-shuangpin.prefs.v4', JSON.stringify({ open: true, surface: 'dock', tab: 'stats' }))
+  storage.set('dsh.shuangpin-reminder.prefs.v4', JSON.stringify({ open: true, surface: 'dock', tab: 'stats' }))
   if (stats !== undefined && stats !== null) {
-    storage.set('dsh.xiaohe-shuangpin.stats.v2', JSON.stringify(stats))
+    storage.set('dsh.shuangpin-reminder.stats.v2', JSON.stringify(stats))
   }
   if (extraStats) jar.set(extraStats.name, extraStats.value)
 
@@ -125,7 +125,7 @@ const sampleStats = {
 {
   const { jar, flush } = mount(sampleStats)
   flush()
-  const names = [...jar.keys()].filter((k) => k.startsWith('dsh.xiaohe.mirror.'))
+  const names = [...jar.keys()].filter((k) => k.startsWith('dsh.shuangpin.mirror.'))
   ok(names.length >= 1, '没有写入 cookie 镜像')
 
   const all = names.map((n) => decodeURIComponent(jar.get(n))).join('')
@@ -147,7 +147,7 @@ const sampleStats = {
   const before = new Map(first.jar)
   // 模拟「换端口」：新页面 localStorage 为空，只剩 cookie 镜像
   const second = mount(null, undefined, before)
-  const restored = second.storage.get('dsh.xiaohe-shuangpin.stats.v2')
+  const restored = second.storage.get('dsh.shuangpin-reminder.stats.v2')
   ok(restored, '换端口后未从镜像恢复统计')
   const parsed = JSON.parse(restored)
   ok(parsed.keys && parsed.keys.q && parsed.keys.q.n === 5, '恢复后的键计数不正确')
@@ -169,10 +169,10 @@ const sampleStats = {
     },
   }
   const value = encodeURIComponent(JSON.stringify(legacy))
-  const { jar, flush } = mount(null, { name: 'dsh.xiaohe.mirror.0', value })
+  const { jar, flush } = mount(null, { name: 'dsh.shuangpin.mirror.0', value })
   flush()
   const leftover = [...jar.entries()]
-    .filter(([k]) => k.startsWith('dsh.xiaohe.mirror.'))
+    .filter(([k]) => k.startsWith('dsh.shuangpin.mirror.'))
     .map(([, v]) => decodeURIComponent(v))
     .join('')
   ok(!leftover.includes('秘密输入'), '旧格式原文仍残留在 cookie 里')

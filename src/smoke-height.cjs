@@ -70,7 +70,7 @@ function collect(node, out) {
 /* 用新会话的空统计挂载：没有历史、没有样本 */
 function mount(prefs) {
   const storage = new Map()
-  storage.set('dsh.xiaohe-shuangpin.prefs.v4', JSON.stringify(prefs))
+  storage.set('dsh.shuangpin-reminder.prefs.v4', JSON.stringify(prefs))
   const sandbox = {
     console,
     require: () => React,

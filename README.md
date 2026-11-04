@@ -4,7 +4,7 @@ Harness Web UI 插件。**默认嵌入在会话内容与输入框之间**（占�
 
 支持 **小鹤双拼 / 自然码 / 微软双拼 / 智能ABC / 拼音加加** 五种常见方案，以及**自定义键位**。
 
-- 插件包：`@local/xiaohe-shuangpin-reminder`（v1.5.0）
+- 插件包：`@local/shuangpin-reminder`（v1.5.0）
 - 双挂载：`conversation.input.dock`（嵌入模式，会话与输入框之间）+ `shell.overlay`（浮窗模式）
 - 默认收起成一条细栏（点「展开」即出键盘），嵌入/浮窗状态都会被记住
 
@@ -82,9 +82,9 @@ node src/derive-check.cjs <rime schema 目录> --check   # 与 src/schemes.cjs �
 
 | 位置 | 内容 | 说明 |
 |------|------|------|
-| `localStorage` `dsh.xiaohe-shuangpin.prefs.v4` | 位置、宽度、透明度、页签、方案、自定义键位 | 纯偏好 |
-| `localStorage` `dsh.xiaohe-shuangpin.stats.v2` | 逐字/逐键统计、最近 30 条输入、回显采样、卡壳过程 | 完整数据，仅此端口可见 |
-| cookie `dsh.xiaohe.mirror.*` | **仅聚合计数**：键次数、错键次数、进度基数 | 见下 |
+| `localStorage` `dsh.shuangpin-reminder.prefs.v4` | 位置、宽度、透明度、页签、方案、自定义键位 | 纯偏好 |
+| `localStorage` `dsh.shuangpin-reminder.stats.v2` | 逐字/逐键统计、最近 30 条输入、回显采样、卡壳过程 | 完整数据，仅此端口可见 |
+| cookie `dsh.shuangpin.mirror.*` | **仅聚合计数**：键次数、错键次数、进度基数 | 见下 |
 
 cookie 镜像的存在理由：GUI 端口每次启动会变，而 `localStorage` 按端口隔离、
 cookie 不分端口，所以用一条小 cookie 让统计在换端口后还能接上。
@@ -92,6 +92,10 @@ cookie 不分端口，所以用一条小 cookie 让统计在换端口后还能�
 因为 cookie 会随同源请求自动发送、且同域脚本可读。镜像约 1KB、1 条 cookie，
 `SameSite=Lax`，https 下自动加 `Secure`。旧版本曾把原文写进镜像，
 升级后会检测并自动重写清除。
+
+**关于旧存储键**：1.5.0 之前包名为 `@local/xiaohe-shuangpin-reminder`，
+存储键前缀是 `dsh.xiaohe.*`。改名后首次启动会自动把旧键的数据迁移到
+`dsh.shuangpin-reminder.*`（新键已有数据时不覆盖），老用户的偏好与统计不会丢。
 
 ## 键位表（小鹤双拼；其余方案在面板标题里切换）
 
@@ -143,6 +147,7 @@ src/smoke-scheme.cjs    方案切换渲染测试
 src/smoke-picker.cjs    自绘下拉交互测试（展开/选中/收起）
 src/smoke-height.cjs    新会话高度回归（面板/键盘不被压扁）
 src/smoke-mirror.cjs    cookie 镜像行为（不含原文 / 可恢复 / 旧数据清除）
+src/smoke-migrate.cjs   旧存储键迁移（不丢偏好与统计）
 src/mirror-size.cjs     镜像体积与隐私体检（估算 cookie 条数与上限）
 src/smoke-proto.cjs     恶意统计数据不污染原型
 src/add-fallbacks.cjs   给主题变量补兜底色（幂等，人工执行）
@@ -165,6 +170,7 @@ node src/smoke-scheme.cjs .       # 方案切换与自定义编辑器
 node src/smoke-picker.cjs .       # 下拉展开/选中/收起
 node src/smoke-height.cjs .       # 面板/键盘不可被压扁
 node src/smoke-mirror.cjs .       # cookie 镜像不含输入原文、可跨端口恢复
+node src/smoke-migrate.cjs .      # 旧存储键迁移不丢数据
 node src/mirror-size.cjs          # 镜像体积与隐私体检
 node src/smoke-proto.cjs .        # 恶意统计数据不污染原型
 node src/layout-check.cjs         # 记录页三栏布局估算

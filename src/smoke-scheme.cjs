@@ -42,7 +42,7 @@ const React = {
 
 function renderWith(prefsJson, uiPatch) {
   const storage = new Map()
-  storage.set('dsh.xiaohe-shuangpin.prefs.v4', JSON.stringify(prefsJson))
+  storage.set('dsh.shuangpin-reminder.prefs.v4', JSON.stringify(prefsJson))
   const listeners = {}
   const doc = {
     addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn) },

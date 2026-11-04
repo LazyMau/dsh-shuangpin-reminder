@@ -1,5 +1,5 @@
 {
-  "name": "@local/xiaohe-shuangpin-reminder",
+  "name": "@local/shuangpin-reminder",
   "version": "1.5.0",
   "private": true,
   "type": "module",
@@ -35,16 +35,20 @@
   },
   "scripts": {
     "build": "node src/build-client.cjs src client.js",
-    "test": "node src/schemes.test.cjs && node src/smoke.cjs . map && node src/smoke.cjs . drill && node src/smoke.cjs . stats && node src/smoke.cjs . float && node src/smoke.cjs . fab && node src/smoke.cjs . capture && node src/smoke-scheme.cjs . && node src/smoke-picker.cjs . && node src/smoke-height.cjs . && node src/smoke-mirror.cjs . && node src/mirror-size.cjs && node src/layout-check.cjs",
+    "test": "node src/schemes.test.cjs && node src/smoke.cjs . map && node src/smoke.cjs . drill && node src/smoke.cjs . stats && node src/smoke.cjs . float && node src/smoke.cjs . fab && node src/smoke.cjs . capture && node src/smoke-scheme.cjs . && node src/smoke-picker.cjs . && node src/smoke-height.cjs . && node src/smoke-mirror.cjs . && node src/smoke-migrate.cjs . && node src/mirror-size.cjs && node src/layout-check.cjs",
     "lint": "node src/lint-locale.cjs",
     "check:schemes": "node src/derive-check.cjs .tmp-schemes --check"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
-      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
     }
   }
 }
