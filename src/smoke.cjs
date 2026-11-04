@@ -156,6 +156,7 @@ if (variant === 'capture') {
 }
 
 const texts = []
+const styleOf = []
 function render(node) {
   if (node === null || node === undefined || typeof node === 'boolean') return
   if (typeof node === 'string' || typeof node === 'number') { texts.push(String(node)); return }
@@ -165,6 +166,7 @@ function render(node) {
   const props = node.props || {}
   if (props.title) texts.push(String(props.title))
   if (props['aria-label']) texts.push(String(props['aria-label']))
+  if (props.style) styleOf.push(props.style)
   if (props.children !== undefined) render(props.children)
 }
 
@@ -195,4 +197,28 @@ if (variant === 'fab') {
   if (joined.length !== 0) throw new Error('collapsed float should render nothing, got: ' + joined)
   console.log('collapsed float renders nothing ✓')
 }
+
+// 标题栏不再显示「刚才 xx」：整棵渲染里不该出现 t('last') 的字样
+if (variant !== 'fab' && joined.includes('刚才')) {
+  throw new Error('标题栏仍显示「刚才」最近输入')
+}
+
+// 记录页：三栏并列——同一父容器里有三个 overflowY:auto 的列
+if (variant === 'stats') {
+  const cols = styleOf.filter((s) => s && s.overflowY === 'auto' && s.maxHeight === 168)
+  if (cols.length !== 3) throw new Error('记录页应为三栏并列，实际列数: ' + cols.length)
+  const wrap = styleOf.filter((s) => s && s.display === 'flex' && s.gap === 10 && s.minHeight === 0)
+  if (!wrap.length) throw new Error('缺少三栏并列容器')
+  console.log('record columns:', cols.length, '✓')
+}
+
+// 面板高度封顶，页签行不被推出视野
+const panelStyle = styleOf.find((s) => s && s.maxHeight === 'calc(100vh - 200px)')
+if ((variant === 'map' || variant === 'stats' || variant === 'drill') && !panelStyle) {
+  throw new Error('面板缺少高度封顶，记录页会顶掉页签')
+}
+if (panelStyle && panelStyle.flexDirection !== 'column') {
+  throw new Error('面板需要竖向 flex，正文才能单独滚动')
+}
+
 console.log('SMOKE OK')

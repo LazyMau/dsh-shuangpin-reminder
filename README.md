@@ -23,7 +23,7 @@ node src/derive-check.cjs <rime schema 目录> --check   # 与 src/schemes.cjs �
 ```
 （会话内容）
 ────────────────────────────────────────
-⠿ 小鹤 [键位][练习][记录] · 刚才 学 xt   ◐ 📌 ⧉ ▾   ← 悬停面板才出现
+⠿ 小鹤双拼 ▾ [键位][练习][记录]              ◐ 📌 ⧉   ← 悬停面板才出现
 ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐
 │Q │W │E │R │T │Y │U │I │O │P │   ← 打 x 时：X[下] K[行] L[想] N[小] R[先] 白框提示
 ├──┴──┴──┴──┴──┴──┴──┴──┴──┤
@@ -63,7 +63,7 @@ node src/derive-check.cjs <rime schema 目录> --check   # 与 src/schemes.cjs �
 - **字级二元**：记录「上一个字 → 下一个字」的接续频率，驱动**键盘框选**的下一个字预测（个人历史优先，内置常用接续兜底，上限 500 组）。
 - 单字耗时 > 你近期均值的 1.5 倍 + 120ms，或退格 ≥ 2 次 → 记为一次「卡」。
 - 字 → 拼音 → 双拼两键（内置 3755 个常用字的表），于是「哪些键常出现在卡顿的字里」就出来了。
-- 「记录」页显示：收集进度、最弱键、卡过的字、**常按错的键**、**卡壳过程**、最近输入（含退格次数）。
+- 「记录」页显示：收集进度、最容易卡的键与常按错的键（并排）、卡过的字，以及**最近输入 / 输入法回显采样 / 卡壳过程**三栏并列。面板高度有上限、只滚正文，所以记录页再长也能随时点回「键位」页。
 - 「练习」页可以切到 **我的错字**，只练你卡过的字。
 
 数据只写本机，不上传：
@@ -121,6 +121,8 @@ src/dict-src.txt        字 + 拼音数据（3755 条）
 src/build-client.cjs    生成脚本（内联方案层与拼音表）
 src/smoke.cjs           本地渲染/捕获冒烟测试
 src/smoke-scheme.cjs    方案切换渲染测试
+src/lint-locale.cjs     文案体检（死字符串 / 重复 key），构建时自动跑
+src/layout-check.cjs    记录页三栏布局估算（窄面板是否会被挤扁）
 locale/                 zh/en 标题与描述
 icon.svg                图标
 ```
@@ -133,6 +135,7 @@ node --check client.js
 node src/schemes.test.cjs         # 方案数据层
 node src/smoke.cjs . map          # 还有 drill / stats / float / fab / capture
 node src/smoke-scheme.cjs .       # 方案切换与自定义编辑器
+node src/layout-check.cjs         # 记录页三栏布局估算
 node src/derive-check.cjs <rime schema 目录> --check
 ```
 

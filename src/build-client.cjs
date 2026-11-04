@@ -24,5 +24,14 @@ const out = template
 
 // 语法自检：整段作为函数体编译，写入前就能发现语法错误（不执行）
 Function(out)
+
+// 文案体检：死字符串与重复 key 都当作构建失败，避免又攒下一堆残留
+const { execFileSync } = require('child_process')
+try {
+  execFileSync(process.execPath, [path.join(__dirname, 'lint-locale.cjs')], { stdio: 'inherit' })
+} catch (error) {
+  throw new Error('文案体检未通过，先修 lint-locale 报告的问题')
+}
+
 fs.writeFileSync(outFile, out)
 console.log('written', outFile, 'bytes', Buffer.byteLength(out), '| dict:', path.basename(path.dirname(dictFile)) + '/' + path.basename(dictFile))

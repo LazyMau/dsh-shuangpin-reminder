@@ -505,23 +505,13 @@ window.__ModuleLoader__.load({
       tabMap: '键位',
       tabDrill: '练习',
       tabStats: '记录',
-      open: '打开双拼键位提醒',
-      minimize: '收起',
       opacity: '透明度',
       lock: '固定面板（内容可选中）',
       unlock: '解除固定（按住标题栏拖动）',
-      anchorTitle: '重新对齐输入框（上方、等宽）',
       toFloat: '切换为浮窗（可拖动）',
       toDock: '嵌入到输入框上方',
-      expand: '展开',
       kbShow: '展开双拼键盘',
       kbHide: '收起双拼键盘',
-      last: '刚才',
-      composing: '正在打',
-      noSample: '还没有记录 — 正常打字就会自动收集',
-      hints: '声母 / 韵母提示',
-      initialsHint: '声母：zh = v · ch = i · sh = u',
-      zeroHint: '零声母：单字母双写（啊 aa、鹅 ee），双字母照全拼（爱 ai、安 an、欧 ou），ang/eng 用 ah、eg；ü 写 v（女 nv）',
       drillTitle: '按两个键',
       drillFocus: '点这里再按键',
       correct: '正确',
@@ -544,6 +534,7 @@ window.__ModuleLoader__.load({
       recentTitle: '最近输入',
       recentNone: '还没有捕获到输入。',
       echoTitle: '输入法回显采样（最近）',
+      echoNone: '还没有回显样本。',
       wrongTitle: '常按错的键',
       wrongRow: '该按 {a}，实按 {b} ×{n}',
       wrongNone: '还没有检测到按键混淆。',
@@ -553,7 +544,6 @@ window.__ModuleLoader__.load({
       tryTag: '盲试{n}',
       clear: '清空',
       slow: '慢',
-      fast: '顺',
       keyTimes: '{n} 次 · 卡 {bad} 次',
       dataNote: '只存在本机',
       schemeLabel: '方案',
@@ -576,23 +566,13 @@ window.__ModuleLoader__.load({
       tabMap: 'Keys',
       tabDrill: 'Drill',
       tabStats: 'Log',
-      open: 'Open Shuangpin Keys',
-      minimize: 'Minimize',
       opacity: 'Opacity',
       lock: 'Pin panel (text selectable)',
       unlock: 'Unpin (drag by the title bar)',
-      anchorTitle: 'Re-align to the composer (above, same width)',
       toFloat: 'Switch to floating window',
       toDock: 'Embed above the composer',
-      expand: 'Expand',
       kbShow: 'Show the Shuangpin keyboard',
       kbHide: 'Hide the Shuangpin keyboard',
-      last: 'Just now',
-      composing: 'Typing',
-      noSample: 'No samples yet — type normally to collect',
-      hints: 'Initial / final hints',
-      initialsHint: 'Initials: zh = v, ch = i, sh = u',
-      zeroHint: 'No initial: a→aa, e→ee, spell two-letter finals out (ai, an, ou), ang/eng → ah, eg; ü is v (nü→nv)',
       drillTitle: 'Press two keys',
       drillFocus: 'Click here, then type',
       correct: 'Correct',
@@ -615,6 +595,7 @@ window.__ModuleLoader__.load({
       recentTitle: 'Recent input',
       recentNone: 'No typing captured yet.',
       echoTitle: 'IME echo samples (latest)',
+      echoNone: 'No echo samples yet.',
       wrongTitle: 'Most-confused keys',
       wrongRow: 'Meant {a}, pressed {b} ×{n}',
       wrongNone: 'No key confusion detected yet.',
@@ -624,7 +605,6 @@ window.__ModuleLoader__.load({
       tryTag: 'tries {n}',
       clear: 'Clear',
       slow: 'slow',
-      fast: 'smooth',
       keyTimes: '{n} times · {bad} stalls',
       dataNote: 'local only',
       schemeLabel: 'Scheme',
@@ -1238,12 +1218,18 @@ window.__ModuleLoader__.load({
         overflow: 'hidden',
         marginBottom: 8,
         userSelect: 'text',
+        // 高度封顶 + 竖向 flex：内容超高时只滚正文，
+        // 标题行（含键位/练习/记录三个页签）永远留在视野内
+        display: 'flex',
+        flexDirection: 'column',
+        maxHeight: 'calc(100vh - 200px)',
       },
       panelFloat: {
         position: 'fixed',
         zIndex: 40,
         maxWidth: 'calc(100vw - 16px)',
-        maxHeight: 'calc(100vh - 24px)',
+        // 与嵌入模式一致：高度封顶，标题行不随内容滚走
+        maxHeight: 'calc(100vh - 48px)',
         display: 'flex',
         flexDirection: 'column',
         boxShadow: '0 18px 50px rgba(0,0,0,0.28)',
@@ -1310,9 +1296,6 @@ window.__ModuleLoader__.load({
         padding: '4px 6px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
       },
       iconOn: { color: 'var(--dsw-alias-brand-primary)' },
-      headerRecent: { display: 'inline-flex', alignItems: 'baseline', gap: 5, fontSize: 11 },
-      headerRecentLabel: { fontSize: 9.5, color: 'var(--dsw-alias-label-secondary)' },
-      headerRecentWord: { fontSize: 13, fontWeight: 600 },
       tab: {
         appearance: 'none', border: '1px solid transparent', background: 'transparent',
         color: 'var(--dsw-alias-label-secondary)', fontSize: 11.5, lineHeight: 1,
@@ -1323,7 +1306,7 @@ window.__ModuleLoader__.load({
         borderColor: 'var(--dsw-alias-border-l1)',
         color: 'var(--dsw-alias-label-primary)',
       },
-      body: { padding: '10px 12px 12px', overflowY: 'auto', overflowX: 'hidden', minHeight: 0, userSelect: 'text', display: 'flex', flexDirection: 'column', gap: 8 },
+      body: { padding: '10px 12px 12px', overflowY: 'auto', overflowX: 'hidden', minHeight: 0, flex: '1 1 auto', userSelect: 'text', display: 'flex', flexDirection: 'column', gap: 8 },
       keyboard: { display: 'flex', flexDirection: 'column' },
       key: {
         appearance: 'none', position: 'relative', padding: 0,
@@ -1469,14 +1452,25 @@ window.__ModuleLoader__.load({
         borderRadius: 6, border: '1px solid var(--dsw-alias-border-l1)', fontSize: 12,
       },
       charChipCode: { fontSize: 9.5, color: 'var(--dsw-alias-state-error-primary)', letterSpacing: 0.5 },
-      eventRow: { display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 11.5 },
-      eventWord: { fontSize: 13, fontWeight: 600, minWidth: 40 },
       code: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', color: 'var(--dsw-alias-brand-primary)', letterSpacing: 1 },
-      eventMeta: { marginLeft: 'auto', fontSize: 10, color: 'var(--dsw-alias-label-secondary)' },
-      echoRow: { display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 10.5 },
-      echoT: { color: 'var(--dsw-alias-label-secondary)', minWidth: 62, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+      echoT: { color: 'var(--dsw-alias-label-secondary)', minWidth: 54, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 10 },
       wrongText: { fontSize: 11, color: 'var(--dsw-alias-label-primary)' },
       empty: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 },
+      // 记录页下半部：最近输入 / 输入法回显 / 卡壳过程 三栏并列，省竖向空间。
+      // 列宽有下限 + 允许换行：窄面板自动折成两行，不会挤成省略号。
+      colsWrap: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'stretch', minHeight: 0 },
+      col: {
+        flex: '1 1 150px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3,
+        padding: '7px 8px', borderRadius: 8,
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        maxHeight: 168, overflowY: 'auto',
+      },
+      colHead: { fontSize: 10.5, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: 1 },
+      colRow: { display: 'flex', alignItems: 'baseline', gap: 5, fontSize: 11, minWidth: 0 },
+      colWord: { fontSize: 12, fontWeight: 600, flex: '0 0 auto' },
+      colCode: { flex: '0 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      colMeta: { marginLeft: 'auto', fontSize: 9.5, color: 'var(--dsw-alias-label-secondary)', flex: '0 0 auto' },
       gripCorner: { position: 'absolute', right: 0, bottom: 0, width: 16, height: 16, cursor: 'nwse-resize', touchAction: 'none', zIndex: 2 },
       gripLine: { position: 'absolute', right: 3, bottom: 3, width: 8, height: 8, borderRight: '2px solid var(--dsw-alias-border-l2)', borderBottom: '2px solid var(--dsw-alias-border-l2)', borderRadius: 1 },
     }
@@ -2077,81 +2071,94 @@ window.__ModuleLoader__.load({
         store.touch()
       }
 
+      // 三栏并列：最近输入 / 输入法回显 / 卡壳过程。每栏各自滚动，整页不再被撑高。
+      const colRecent = h('div', { style: S.col },
+        h('div', { style: S.colHead }, t('recentTitle')),
+        events.length
+          ? events.map(function (event, index) {
+              return h('div', { key: 'ev-' + event.t + '-' + index, style: S.colRow },
+                h('span', { style: S.colWord }, event.word),
+                h('span', { style: Object.assign({}, S.code, S.colCode) }, (event.codes || []).filter(Boolean).join(' ')),
+                h('span', { style: S.colMeta },
+                  [
+                    event.backs ? t('backTag').replace('{n}', event.backs) : null,
+                    event.slow ? t('slow') : null,
+                    event.ms ? (Math.round(event.ms / 100) / 10) + 's' : null,
+                  ].filter(Boolean).join('·')))
+            })
+          : h('div', { style: S.empty }, t('recentNone')),
+      )
+
+      const colEcho = h('div', { style: S.col },
+        h('div', { style: S.colHead }, t('echoTitle')),
+        (stats.echo && stats.echo.length)
+          ? stats.echo.slice(0, 8).map(function (row, index) {
+              return h('div', { key: 'ec-' + row.t + '-' + index, style: S.colRow },
+                h('span', { style: S.echoT }, '+' + row.t + 'ms'),
+                h('span', { style: Object.assign({}, S.code, S.colCode) }, row.d))
+            })
+          : h('div', { style: S.empty }, t('echoNone')),
+      )
+
+      const colStall = h('div', { style: S.col },
+        h('div', { style: S.colHead }, t('stallTitle')),
+        stalls.length
+          ? stalls.map(function (stall, index) {
+              return h('div', { key: 'st-' + stall.t + '-' + index, style: S.colRow },
+                h('span', { style: S.colWord }, stall.word),
+                h('span', { style: Object.assign({}, S.code, S.colCode) }, (stall.seq || []).join('→')),
+                h('span', { style: S.colMeta },
+                  [
+                    stall.backs ? t('backTag').replace('{n}', stall.backs) : null,
+                    stall.shrinks ? t('tryTag').replace('{n}', stall.shrinks) : null,
+                    stall.ms ? (Math.round(stall.ms / 100) / 10) + 's' : null,
+                  ].filter(Boolean).join('·')))
+            })
+          : h('div', { style: S.empty }, t('stallNone')),
+      )
+
       return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 9 } },
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8 } },
           h('span', { style: S.sectionTitle }, t('progress').replace('{n}', total).replace('{goal}', goal)),
           h('span', { style: Object.assign({}, S.empty, { marginLeft: 'auto', fontSize: 9.5 }) }, t('dataNote'))),
         h('div', { style: S.barTrack },
           h('div', { style: Object.assign({}, S.barFill, { width: Math.max(3, pct) + '%', background: 'var(--dsw-alias-brand-primary)' }) })),
-        h('div', { style: S.sectionTitle }, t('weakTitle')),
-        ranked.length
-          ? ranked.map(function (row) {
-              const color = heatColor(row.weakness) || 'var(--dsw-alias-state-idle-primary)'
-              const value = Math.round((row.weakness === null ? 0 : row.weakness) * 100)
-              return h('div', { key: row.key, style: S.weakRow },
-                h('span', { style: S.weakKey }, row.key.toUpperCase()),
-                h('span', { style: S.barTrack }, h('span', { style: Object.assign({}, S.barFill, { width: Math.max(4, value) + '%', background: color }) })),
-                h('span', { style: S.weakMeta }, t('keyTimes').replace('{n}', row.n).replace('{bad}', row.bad)))
-            })
-          : h('div', { style: S.empty }, t('weakNone')),
+        // 弱键与常按错键并排，同样为了省高度；窄面板自动折行
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' } },
+          h('div', { style: { flex: '1 1 180px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('div', { style: S.sectionTitle }, t('weakTitle')),
+            ranked.length
+              ? ranked.map(function (row) {
+                  const color = heatColor(row.weakness) || 'var(--dsw-alias-state-idle-primary)'
+                  const value = Math.round((row.weakness === null ? 0 : row.weakness) * 100)
+                  return h('div', { key: row.key, style: S.weakRow },
+                    h('span', { style: S.weakKey }, row.key.toUpperCase()),
+                    h('span', { style: S.barTrack }, h('span', { style: Object.assign({}, S.barFill, { width: Math.max(4, value) + '%', background: color }) })),
+                    h('span', { style: S.weakMeta }, t('keyTimes').replace('{n}', row.n).replace('{bad}', row.bad)))
+                })
+              : h('div', { style: S.empty }, t('weakNone'))),
+          h('div', { style: { flex: '1 1 180px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('div', { style: S.sectionTitle }, t('wrongTitle')),
+            wrong.length
+              ? wrong.map(function (row) {
+                  return h('div', { key: 'wr-' + row.correct + row.pressed, style: S.weakRow },
+                    h('span', { style: S.wrongText },
+                      t('wrongRow').replace('{a}', row.correct.toUpperCase()).replace('{b}', row.pressed.toUpperCase()).replace('{n}', row.n)))
+                })
+              : h('div', { style: S.empty }, t('wrongNone')))),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 } },
           h('span', { style: S.sectionTitle }, t('charsTitle')),
           chars.length
             ? h('button', { type: 'button', style: S.action, onClick: drillThem }, t('drillThem'))
             : null),
         chars.length
-          ? h('div', null, chars.map(function (item) {
+          ? h('div', { style: { maxHeight: 96, overflowY: 'auto' } }, chars.map(function (item) {
               return h('span', { key: 'ch-' + item.h, style: S.charChip },
                 h('span', null, item.h),
                 h('span', { style: S.charChipCode }, item.code))
             }))
           : h('div', { style: S.empty }, t('charsNone')),
-        h('div', { style: Object.assign({}, S.sectionTitle, { marginTop: 2 }) }, t('recentTitle')),
-        events.length
-          ? events.map(function (event, index) {
-              return h('div', { key: 'ev-' + event.t + '-' + index, style: S.eventRow },
-                h('span', { style: S.eventWord }, event.word),
-                h('span', { style: S.code }, (event.codes || []).filter(Boolean).join(' ')),
-                h('span', { style: S.eventMeta },
-                  (event.backs ? t('backTag').replace('{n}', event.backs) + ' · ' : '') +
-                  (event.slow ? t('slow') + ' · ' : '') + (event.ms ? (Math.round(event.ms / 100) / 10) + 's' : '')))
-            })
-          : h('div', { style: S.empty }, t('recentNone')),
-        wrong.length
-          ? h('div', { style: Object.assign({}, S.sectionTitle, { marginTop: 2 }) }, t('wrongTitle'))
-          : null,
-        wrong.length
-          ? wrong.map(function (row) {
-              return h('div', { key: 'wr-' + row.correct + row.pressed, style: S.weakRow },
-                h('span', { style: S.wrongText },
-                  t('wrongRow').replace('{a}', row.correct.toUpperCase()).replace('{b}', row.pressed.toUpperCase()).replace('{n}', row.n)))
-            })
-          : null,
-        stalls.length
-          ? h('div', { style: Object.assign({}, S.sectionTitle, { marginTop: 2 }) }, t('stallTitle'))
-          : null,
-        stalls.length
-          ? stalls.map(function (stall, index) {
-              return h('div', { key: 'st-' + stall.t + '-' + index, style: S.eventRow },
-                h('span', { style: S.eventWord }, stall.word),
-                h('span', { style: S.code }, (stall.seq || []).join('→')),
-                h('span', { style: S.eventMeta },
-                  [
-                    stall.backs ? t('backTag').replace('{n}', stall.backs) : null,
-                    stall.shrinks ? t('tryTag').replace('{n}', stall.shrinks) : null,
-                    stall.ms ? (Math.round(stall.ms / 100) / 10) + 's' : null,
-                  ].filter(Boolean).join(' · ')))
-            })
-          : null,
-        (stats.echo && stats.echo.length)
-          ? h('div', null,
-              h('div', { style: Object.assign({}, S.sectionTitle, { marginBottom: 4 }) }, t('echoTitle')),
-              stats.echo.slice(0, 10).map(function (row, index) {
-                return h('div', { key: 'ec-' + row.t + '-' + index, style: S.echoRow },
-                  h('span', { style: S.echoT }, '+' + row.t + 'ms'),
-                  h('span', { style: S.code }, row.d))
-              }))
-          : null,
+        h('div', { style: S.colsWrap }, colRecent, colEcho, colStall),
         h('div', { style: { display: 'flex', justifyContent: 'flex-end' } },
           h('button', { type: 'button', style: S.action, onClick: clear }, t('clear'))),
       )
@@ -2224,7 +2231,6 @@ window.__ModuleLoader__.load({
       children.push(opts.tabButton('map', t('tabMap')))
       children.push(opts.tabButton('drill', t('tabDrill')))
       children.push(opts.tabButton('stats', t('tabStats')))
-      if (opts.recentNode) children.push(opts.recentNode)
       children.push(h('span', { style: S.spacer }))
       if (opts.surface === 'float') {
         children.push(h('label', {
@@ -2332,15 +2338,6 @@ window.__ModuleLoader__.load({
         pointerEvents: hovered ? 'auto' : 'none',
         transition: 'opacity 120ms ease',
       }
-      const recent = state.stats.events && state.stats.events[0]
-      const recentNode = recent && width >= 460
-        ? h('span', { style: S.headerRecent, title: t('last') },
-            h('span', { style: S.headerRecentLabel }, t('last')),
-            h('span', { style: S.headerRecentWord }, Array.from(recent.word).slice(0, 4).join('')),
-            h('span', { style: S.code }, (recent.codes || []).filter(Boolean).slice(0, 2).join(' ')),
-            recent.slow ? h('span', { style: Object.assign({}, S.headerRecentLabel, { color: 'var(--dsw-alias-state-error-primary)' }) }, t('slow')) : null)
-        : null
-
       let body = null
       if (prefs.tab === 'drill') body = h(DrillTab, { store: store, stats: state.stats, prefs: prefs, t: t })
       else if (prefs.tab === 'stats') body = h(StatsTab, { store: store, stats: state.stats, prefs: prefs, t: t })
@@ -2356,7 +2353,7 @@ window.__ModuleLoader__.load({
       },
         h('div', { style: Object.assign({}, S.header, chromeStyle, { cursor: 'default' }) },
           renderHeader({
-            t: t, prefs: prefs, store: store, surface: 'dock', recentNode: recentNode,
+            t: t, prefs: prefs, store: store, surface: 'dock',
             tabButton: tabButtonFn(store, prefs),
             minimize: function () { prefs.open = false; store.touch() },
             toFloat: toFloat,
@@ -2471,15 +2468,6 @@ window.__ModuleLoader__.load({
         store.touch()
       }
 
-      const recent = state.stats.events && state.stats.events[0]
-      const recentNode = recent
-        ? h('span', { style: S.headerRecent, title: t('last') },
-            h('span', { style: S.headerRecentLabel }, t('last')),
-            h('span', { style: S.headerRecentWord }, Array.from(recent.word).slice(0, 4).join('')),
-            h('span', { style: S.code }, (recent.codes || []).filter(Boolean).slice(0, 2).join(' ')),
-            recent.slow ? h('span', { style: Object.assign({}, S.headerRecentLabel, { color: 'var(--dsw-alias-state-error-primary)' }) }, t('slow')) : null)
-        : null
-
       let body = null
       if (prefs.tab === 'drill') body = h(DrillTab, { store: store, stats: state.stats, prefs: prefs, t: t })
       else if (prefs.tab === 'stats') body = h(StatsTab, { store: store, stats: state.stats, prefs: prefs, t: t })
@@ -2502,7 +2490,7 @@ window.__ModuleLoader__.load({
           title: prefs.locked ? t('lock') : t('unlock'),
         },
           renderHeader({
-            t: t, prefs: prefs, store: store, surface: 'float', recentNode: recentNode,
+            t: t, prefs: prefs, store: store, surface: 'float',
             tabButton: tabButtonFn(store, prefs),
             setOpacity: setOpacity,
             toggleLock: toggleLock,
