@@ -138,13 +138,11 @@ function expectMissing(haystack, needle, label) {
   if (haystack.includes(needle)) throw new Error(`${label}: 不该出现 ${needle}`)
 }
 
-/* 标题栏就是方案下拉：五个内置方案都可在标题栏选中 */
-expectContains(flypyJoin, '小鹤双拼', '标题含小鹤双拼')
-expectContains(flypyJoin, '自然码', '标题含自然码')
-expectContains(flypyJoin, '微软双拼', '标题含微软双拼')
-expectContains(flypyJoin, '智能ABC', '标题含智能ABC')
-expectContains(flypyJoin, '拼音加加', '标题含拼音加加')
-expectContains(flypyJoin, '自定义…', '标题含自定义项')
+/* 标题栏就是方案下拉：收起时只显示当前方案名（选项列表点开才渲染，见 smoke-picker） */
+expectContains(flypyJoin, '小鹤双拼', '标题显示当前方案名')
+expectContains(mspyJoin, '微软双拼', '微软方案下标题显示微软双拼')
+expectContains(abcJoin, '智能ABC', '智能ABC 方案下标题显示智能ABC')
+expectMissing(flypyJoin, '自然码', '收起时不应渲染其他方案名')
 
 /* 键位页不再有独立的方案栏（旧的「方案」标签不该出现） */
 expectMissing(flypyJoin, '方案', '键位页不应有方案栏')

@@ -1277,16 +1277,6 @@ window.__ModuleLoader__.load({
       },
       grip: { color: 'var(--dsw-alias-label-secondary)', fontSize: 13, lineHeight: 1, letterSpacing: 1 },
       title: { fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' },
-      schemeTitle: {
-        appearance: 'none', border: '1px solid transparent', background: 'transparent',
-        color: 'var(--dsw-alias-label-primary)', padding: '2px 16px 2px 2px',
-        borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
-        // 自绘下拉箭头，避免依赖原生 select 外观
-        backgroundImage: 'linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%)',
-        backgroundPosition: 'calc(100% - 9px) 55%, calc(100% - 5px) 55%',
-        backgroundSize: '4px 4px, 4px 4px',
-        backgroundRepeat: 'no-repeat',
-      },
       spacer: { flex: '1 1 auto' },
       sliderWrap: { display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--dsw-alias-label-secondary)' },
       slider: { width: 90, accentColor: 'var(--dsw-alias-brand-primary)', cursor: 'pointer' },
@@ -1357,12 +1347,35 @@ window.__ModuleLoader__.load({
         display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
         marginBottom: 8, fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)',
       },
-      schemeSelect: {
-        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1)',
-        background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)',
-        fontSize: 10.5, padding: '2px 6px', borderRadius: 6,
-        cursor: 'pointer', fontFamily: 'inherit',
+      // 自绘下拉：原生 select 的弹层由系统绘制（白底黑字）且跟随不了主题，统一换掉
+      picker: { position: 'relative', display: 'inline-flex' },
+      pickerButton: {
+        appearance: 'none', display: 'inline-flex', alignItems: 'center', gap: 5,
+        border: '1px solid transparent', background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)', fontSize: 13, fontWeight: 600,
+        padding: '3px 4px', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+        lineHeight: 1.2, whiteSpace: 'nowrap',
       },
+      pickerButtonOpen: { background: 'var(--dsw-alias-bg-layer-2)', borderColor: 'var(--dsw-alias-border-l1)' },
+      pickerButtonSmall: { fontSize: 10.5, fontWeight: 400, padding: '2px 5px' },
+      pickerCaret: { fontSize: 8, opacity: 0.6, lineHeight: 1 },
+      pickerList: {
+        position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 60,
+        minWidth: '100%', display: 'flex', flexDirection: 'column', gap: 1,
+        padding: 4, borderRadius: 8,
+        background: 'var(--dsw-alias-bg-layer-1)',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        boxShadow: '0 10px 28px rgba(0,0,0,0.22)',
+      },
+      pickerItem: {
+        appearance: 'none', display: 'flex', alignItems: 'center', gap: 6,
+        border: '1px solid transparent', background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)', fontSize: 11.5,
+        padding: '5px 8px', borderRadius: 6, cursor: 'pointer',
+        fontFamily: 'inherit', textAlign: 'left', whiteSpace: 'nowrap',
+      },
+      pickerItemOn: { color: 'var(--dsw-alias-brand-primary)', fontWeight: 600 },
+      pickerCheck: { width: 10, fontSize: 9, flex: '0 0 auto' },
       schemeAction: {
         appearance: 'none', border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent',
         color: 'var(--dsw-alias-label-secondary)', fontSize: 10, padding: '2px 7px',
@@ -1757,15 +1770,16 @@ window.__ModuleLoader__.load({
         h('div', { style: S.customRow },
           h('label', { style: S.customCell },
             h('span', { style: S.customLabel }, t('customTemplate')),
-            h('select', {
-              style: S.schemeSelect,
+            h(Picker, {
               value: template,
-              onChange: function (event) { resetFrom(event.target.value) },
-            },
-              SCHEME_IDS.map(function (id) {
-                return h('option', { key: id, value: id }, SCHEMES[id].name)
+              options: SCHEME_IDS.map(function (id) {
+                return { value: id, label: SCHEMES[id].name }
               }),
-            ))),
+              label: t('customTemplate'),
+              style: S.pickerButton,
+              dropStyle: { minWidth: 128 },
+              onPick: resetFrom,
+            }))),
         h('div', { style: S.customGrid },
           FINAL_ORDER.map(function (final) {
             return h('label', { key: 'f-' + final, style: S.customCell },
@@ -1796,14 +1810,18 @@ window.__ModuleLoader__.load({
           }),
           h('label', { style: S.customCell },
             h('span', { style: S.customLabel }, t('customZero')),
-            h('select', {
-              style: S.schemeSelect,
+            h(Picker, {
               value: zero,
-              onChange: function (event) { setZero(event.target.value) },
-            },
-              h('option', { value: 'natural' }, t('zeroNatural')),
-              h('option', { value: 'o' }, t('zeroO')),
-            ))),
+              options: [
+                { value: 'natural', label: t('zeroNatural') },
+                { value: 'o', label: t('zeroO') },
+              ],
+              label: t('customZero'),
+              style: S.pickerButton,
+              small: true,
+              dropStyle: { minWidth: 92 },
+              onPick: setZero,
+            }))),
         complete ? null : h('div', { style: S.bad }, t('customIncomplete')),
         h('div', { style: S.footer },
           h('span', { style: S.statsText }, t('customKeys').replace('{n}', Object.keys(used).length)),
@@ -2179,6 +2197,77 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * 自绘下拉。原生 <select> 的候选项列表由操作系统绘制：白底黑字、
+     * 跟随不了面板主题，未展开时也容易被宿主样式盖成白底白字。
+     * 这里用按钮 + 绝对定位列表自己画，配色全部取主题变量。
+     */
+    function Picker(props) {
+      const [open, setOpen] = React.useState(false)
+      const wrapRef = React.useRef(null)
+      const current = props.options.find(function (opt) { return opt.value === props.value })
+      const labelText = current ? current.label : props.value
+
+      // 点外面或按 Esc 收起
+      React.useEffect(function () {
+        if (!open) return undefined
+        function onDown(event) {
+          if (wrapRef.current && wrapRef.current.contains && wrapRef.current.contains(event.target)) return
+          setOpen(false)
+        }
+        function onKey(event) {
+          if (event.key === 'Escape') setOpen(false)
+        }
+        document.addEventListener('pointerdown', onDown)
+        document.addEventListener('keydown', onKey)
+        return function () {
+          document.removeEventListener('pointerdown', onDown)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [open])
+
+      return h('div', { ref: wrapRef, style: S.picker, 'data-nodrag': true },
+        h('button', {
+          type: 'button',
+          'data-nodrag': true,
+          style: Object.assign({}, props.style, open ? S.pickerButtonOpen : null, props.small ? S.pickerButtonSmall : null),
+          title: props.hint || props.label,
+          'aria-label': props.label,
+          'aria-haspopup': 'listbox',
+          'aria-expanded': open,
+          onPointerDown: function (event) { event.stopPropagation() },
+          onClick: function (event) {
+            event.stopPropagation()
+            setOpen(function (prev) { return !prev })
+          },
+        },
+          h('span', null, labelText),
+          h('span', { style: S.pickerCaret, 'aria-hidden': true }, '▼')),
+        open
+          ? h('div', {
+              style: Object.assign({}, S.pickerList, props.dropStyle),
+              role: 'listbox',
+              onPointerDown: function (event) { event.stopPropagation() },
+            }, props.options.map(function (opt) {
+              const on = opt.value === props.value
+              return h('button', {
+                key: opt.value,
+                type: 'button',
+                role: 'option',
+                'aria-selected': on,
+                style: Object.assign({}, S.pickerItem, on ? S.pickerItemOn : null),
+                onClick: function (event) {
+                  event.stopPropagation()
+                  setOpen(false)
+                  props.onPick(opt.value)
+                },
+              },
+                h('span', { style: S.pickerCheck, 'aria-hidden': true }, on ? '✓' : ''),
+                h('span', null, opt.label))
+            }))
+          : null)
+    }
+
     function renderHeader(opts) {
       const children = []
       const prefs = opts.prefs
@@ -2189,18 +2278,18 @@ window.__ModuleLoader__.load({
           'aria-hidden': true,
         }, '⠿'))
       }
-      // 标题即方案名：下拉框显示当前方案（如「小鹤双拼」），点开直接换方案；
+      // 标题即方案名：下拉显示当前方案（如「小鹤双拼」），点开直接换方案；
       // 键位页因此不再需要单独的方案栏。插件名放在 title 提示里。
-      children.push(h('select', {
-        type: 'select',
+      children.push(h(Picker, {
         value: prefs.scheme || 'flypy',
-        style: Object.assign({}, S.title, S.schemeTitle),
-        title: t('title') + ' · ' + t('schemeLabel'),
-        'aria-label': t('schemeLabel'),
-        'data-nodrag': true,
-        onPointerDown: function (event) { event.stopPropagation() },
-        onChange: function (event) {
-          const next = event.target.value
+        options: SCHEME_IDS.map(function (id) {
+          return { value: id, label: SCHEMES[id].name }
+        }).concat([{ value: 'custom', label: t('schemeCustom') }]),
+        label: t('schemeLabel'),
+        hint: t('title') + ' · ' + t('schemeLabel'),
+        style: S.pickerButton,
+        dropStyle: { minWidth: 128 },
+        onPick: function (next) {
           prefs.scheme = next
           // 首次选「自定义…」时还没有键位表：直接打开编辑器，以当前方案为模板，
           // 否则下拉显示「自定义」而实际仍按上一个方案运行，容易误解
@@ -2209,12 +2298,7 @@ window.__ModuleLoader__.load({
           }
           opts.store.touch()
         },
-      },
-        SCHEME_IDS.map(function (id) {
-          return h('option', { key: id, value: id }, SCHEMES[id].name)
-        }),
-        h('option', { key: 'custom', value: 'custom' }, t('schemeCustom')),
-      ))
+      }))
       if (prefs.scheme === 'custom') {
         children.push(h('button', {
           type: 'button',

@@ -121,6 +121,7 @@ src/dict-src.txt        字 + 拼音数据（3755 条）
 src/build-client.cjs    生成脚本（内联方案层与拼音表）
 src/smoke.cjs           本地渲染/捕获冒烟测试
 src/smoke-scheme.cjs    方案切换渲染测试
+src/smoke-picker.cjs    自绘下拉交互测试（展开/选中/收起）
 src/lint-locale.cjs     文案体检（死字符串 / 重复 key），构建时自动跑
 src/layout-check.cjs    记录页三栏布局估算（窄面板是否会被挤扁）
 locale/                 zh/en 标题与描述
@@ -135,6 +136,7 @@ node --check client.js
 node src/schemes.test.cjs         # 方案数据层
 node src/smoke.cjs . map          # 还有 drill / stats / float / fab / capture
 node src/smoke-scheme.cjs .       # 方案切换与自定义编辑器
+node src/smoke-picker.cjs .       # 下拉展开/选中/收起
 node src/layout-check.cjs         # 记录页三栏布局估算
 node src/derive-check.cjs <rime schema 目录> --check
 ```
