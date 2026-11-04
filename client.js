@@ -1219,9 +1219,12 @@ window.__ModuleLoader__.load({
         marginBottom: 8,
         userSelect: 'text',
         // 高度封顶 + 竖向 flex：内容超高时只滚正文，
-        // 标题行（含键位/练习/记录三个页签）永远留在视野内
+        // 标题行（含键位/练习/记录三个页签）永远留在视野内。
+        // flexShrink:0 很关键——面板是 dock 插槽里的 flex 子项，默认会被压缩；
+        // 新会话时消息区还没内容、可用高度更小，压缩后键盘就只剩一行。
         display: 'flex',
         flexDirection: 'column',
+        flexShrink: 0,
         maxHeight: 'calc(100vh - 200px)',
       },
       panelFloat: {
@@ -1297,7 +1300,8 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-primary)',
       },
       body: { padding: '10px 12px 12px', overflowY: 'auto', overflowX: 'hidden', minHeight: 0, flex: '1 1 auto', userSelect: 'text', display: 'flex', flexDirection: 'column', gap: 8 },
-      keyboard: { display: 'flex', flexDirection: 'column' },
+      // flexShrink:0 —— 键盘永远按自身行高完整显示，不被正文的滚动区压扁
+      keyboard: { display: 'flex', flexDirection: 'column', flexShrink: 0 },
       key: {
         appearance: 'none', position: 'relative', padding: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -1651,7 +1655,7 @@ window.__ModuleLoader__.load({
       const rows = rowsData.map(function (row, rowIndex) {
         return h(
           'div',
-          { key: 'row-' + rowIndex, style: { display: 'flex', gap: gap, marginTop: rowIndex ? gap : 0, marginLeft: rowIndex * offset } },
+          { key: 'row-' + rowIndex, style: { display: 'flex', gap: gap, marginTop: rowIndex ? gap : 0, marginLeft: rowIndex * offset, flexShrink: 0 } },
           row.map(function (item) {
             const key = item.k.toLowerCase()
             const weakness = weaknessOf(keyStats[key])
