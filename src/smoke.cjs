@@ -177,13 +177,19 @@ console.log('variant:', variant, '| effect errors:', errors.length ? errors.slic
 console.log('sample:', joined.slice(0, 320))
 
 const need = {
-  map: ['小鹤', '键位', '练习', '记录', '声母：zh'],
+  // 标题栏就是方案下拉：默认页应看到全部方案名，且不再有独立的「方案」标签栏
+  map: ['键位', '练习', '记录', '声母：zh', '小鹤双拼', '自然码', '微软双拼', '智能ABC', '拼音加加', '自定义'],
   drill: ['按两个键', '常用字'],
   stats: ['已收集', '最容易卡的键', '卡过的字', '学', '输入法回显采样', '+480ms', '常按错的键', '该按 H，实按 N', '卡壳过程', 'wn→w→wh'],
-  float: ['小鹤', '键位', '透明度', '固定面板'],
+  float: ['键位', '透明度', '固定面板', '小鹤双拼'],
 }[variant] || []
 for (const needle of need) {
   if (!joined.includes(needle)) throw new Error('missing rendered text: ' + needle)
+}
+// 键位页不该再有独立方案栏：标题下拉直接显示当前方案名（默认小鹤双拼）
+if (variant === 'map' || variant === 'float') {
+  if (!joined.includes('双拼键位提醒')) throw new Error('标题提示里应含插件名「双拼键位提醒」')
+  if (!joined.includes('小鹤双拼')) throw new Error('标题下拉应显示当前方案名')
 }
 if (variant === 'fab') {
   if (joined.length !== 0) throw new Error('collapsed float should render nothing, got: ' + joined)

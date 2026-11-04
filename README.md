@@ -1,10 +1,22 @@
-# 小鹤双拼提醒（Xiaohe Shuangpin Reminder）
+# 双拼键位提醒（Shuangpin Keys）
 
 Harness Web UI 插件。**默认嵌入在会话内容与输入框之间**（占真实布局，不遮挡任何内容），也可一键切换为**可拖动的浮窗**；它在你正常打字时自动收集速度与卡顿，把常卡的键标红，打字时在键盘上白框提示候选键位，并把「卡过的字」变成练习。
 
-- 插件包：`@local/xiaohe-shuangpin-reminder`（v1.3.0）
+支持 **小鹤双拼 / 自然码 / 微软双拼 / 智能ABC / 拼音加加** 五种常见方案，以及**自定义键位**。
+
+- 插件包：`@local/xiaohe-shuangpin-reminder`（v1.5.0）
 - 双挂载：`conversation.input.dock`（嵌入模式，会话与输入框之间）+ `shell.overlay`（浮窗模式）
 - 默认收起成一条细栏（点「展开」即出键盘），嵌入/浮窗状态都会被记住
+
+## 方案切换
+
+面板**左上角标题就是方案下拉框**（显示当前方案名，如「小鹤双拼」），点开即可换方案；键位页本身不再放方案栏。选中「自定义…」会打开键位编辑器：可先选一个内置方案作模板，再逐个韵母改键，另可切换零声母规则（照全拼 / o 打头）。
+
+键位表不是手写的，而是从 rime 官方 schema 的 `speller/algebra` 规则机械推导而来，并用 `src/derive-check.cjs` 校验，避免抄错：
+
+```powershell
+node src/derive-check.cjs <rime schema 目录> --check   # 与 src/schemes.cjs 内置表比对
+```
 
 ## 界面（嵌入模式 = 默认）
 
@@ -56,13 +68,13 @@ Harness Web UI 插件。**默认嵌入在会话内容与输入框之间**（占�
 
 数据只写本机，不上传：
 
-- `dsh.xiaohe-shuangpin.prefs.v3`：位置、宽度、透明度、页签、开关
+- `dsh.xiaohe-shuangpin.prefs.v4`：位置、宽度、透明度、页签、开关、当前方案与自定义键位
 - `dsh.xiaohe-shuangpin.stats.v2`：每字/每键统计、最近 30 条输入、输入法回显采样
 - cookie 镜像 `dsh.xiaohe.mirror.*`：上面两份数据的压缩副本。因为 GUI 端口每次启动会变，而 `localStorage` 按端口隔离，cookie 不分端口——换端口首次启动时自动从镜像恢复统计，重启不再清零（镜像最多保留 400 个字、12 条最近输入；完整数据仍在当前端口的 localStorage 里）。
 
 「记录」页有「清空」（会同时清掉 localStorage 和 cookie 镜像）。
 
-## 键位表（依据 Rime `double_pinyin_flypy`）
+## 键位表（小鹤双拼；其余方案在面板标题里切换）
 
 | 键 | 韵母 | 例 | 键 | 韵母 | 例 |
 |----|------|----|----|------|----|
@@ -81,8 +93,18 @@ Harness Web UI 插件。**默认嵌入在会话内容与输入框之间**（占�
 | N | iao | 小 xiǎo → xn | M | ian | 天 tiān → tm |
 
 - 每个音节两个键：声母键 + 韵母键。
-- 零声母：单字母双写（啊 `aa`、鹅 `ee`），双字母照全拼（爱 `ai`、安 `an`、欧 `ou`、恩 `en`、而 `er`），ang/eng 用 `ah`、`eg`。
+- 小鹤零声母：单字母双写（啊 `aa`、鹅 `ee`），双字母照全拼（爱 `ai`、安 `an`、欧 `ou`、恩 `en`、而 `er`），ang/eng 用 `ah`、`eg`。
 - `ü` 一律按 `v`：女 `nv`、绿 `lv`、略 `lt`；`ju/qu/xu/yu` 里的 u 也按 `v`：去 `qv`。
+
+**其他方案的差异**（键位细节见面板内的键帽）：
+
+| 方案 | 声母 zh/ch/sh | 零声母 | 特点 |
+|------|---------------|--------|------|
+| 小鹤双拼 | v / i / u | 照全拼 | 本表 |
+| 自然码 | v / i / u | 照全拼 | ai=l、ei=z、ing=y、un=p |
+| 微软双拼 | v / i / u | o 打头 | ing=`;` 键、ü=y |
+| 智能ABC | a / e / v | o 打头 | ian=w、in=c、iao=z |
+| 拼音加加 | v / u / i | o 打头 | ao=d、an=f、en=r |
 
 ## 目录
 
@@ -90,11 +112,15 @@ Harness Web UI 插件。**默认嵌入在会话内容与输入框之间**（占�
 package.json            插件清单
 cordis.patch.yml        插入 Host 行
 index.js                Host 半边（空实现）
-client.js               生成的 Client 模块（含拼音表）
-src/client.template.js  可读源码（只改这里）
+client.js               生成的 Client 模块（含拼音表与方案表）
+src/client.template.js  可读源码（UI 与业务逻辑，只改这里）
+src/schemes.cjs         双拼方案数据层（键位表 / 编码 / 拼音解析，可独立测试）
+src/derive-check.cjs    从 rime schema 推导键位并校验内置表
+src/schemes.test.cjs    方案数据层断言测试
 src/dict-src.txt        字 + 拼音数据（3755 条）
-src/build-client.cjs    生成脚本
+src/build-client.cjs    生成脚本（内联方案层与拼音表）
 src/smoke.cjs           本地渲染/捕获冒烟测试
+src/smoke-scheme.cjs    方案切换渲染测试
 locale/                 zh/en 标题与描述
 icon.svg                图标
 ```
@@ -104,7 +130,10 @@ icon.svg                图标
 ```powershell
 node src/build-client.cjs src client.js
 node --check client.js
-node src/smoke.cjs . map      # 还有 drill / stats / fab / capture
+node src/schemes.test.cjs         # 方案数据层
+node src/smoke.cjs . map          # 还有 drill / stats / float / fab / capture
+node src/smoke-scheme.cjs .       # 方案切换与自定义编辑器
+node src/derive-check.cjs <rime schema 目录> --check
 ```
 
 ## 已知限制

@@ -1,9 +1,9 @@
 {
   "name": "@local/xiaohe-shuangpin-reminder",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
-  "description": "可拖动、可拉伸的小鹤双拼悬浮面板：自动收集打字速度与卡顿，给键位加热力标记，卡住时亮键，并把卡过的字做成练习。",
+  "description": "双拼键位提醒：可拖动、可拉伸的悬浮面板，自动收集打字速度与卡顿，给键位加热力标记，卡住时亮键，并把卡过的字做成练习。支持小鹤、自然码、微软、智能ABC、拼音加加与自定义键位。",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

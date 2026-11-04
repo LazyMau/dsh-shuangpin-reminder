@@ -1,3 +1,343 @@
+/**
+ * 双拼方案数据层（与 UI 无关，可独立 require 测试）
+ *
+ * 键位表来源：rime 官方双拼方案 schema 的 speller/algebra
+ *   double_pinyin_flypy  小鹤双拼
+ *   double_pinyin        自然码
+ *   double_pinyin_mspy   微软双拼
+ *   double_pinyin_abc    智能ABC
+ *   double_pinyin_pyjj   拼音加加
+ * 按 yaml 里的 xform/derive 规则逐条推导「韵母 → 键位」，见 src/derive-schemes.cjs。
+ *
+ * zero 字段表示零声母规则：
+ *   'natural' 单字母双写（啊 aa）、双字母照全拼（爱 ai）、三字母首字母+键（昂 ah）
+ *   'o'       固定 o 前缀 + 韵母键（爱 ol、昂 oh）
+ */
+var SchemeLib = (function () {
+  'use strict'
+
+  var FINAL_ORDER = [
+    'a', 'o', 'e', 'i', 'u', 'v',
+    'ai', 'ei', 'ao', 'ou', 'an', 'en', 'ang', 'eng', 'er',
+    'ia', 'ie', 'iao', 'iu', 'ian', 'in', 'iang', 'ing', 'iong', 'ong',
+    'ua', 'uo', 'uai', 'ui', 'uan', 'un', 'uang', 'ue', 've',
+  ]
+  var FINAL_SET = {}
+  FINAL_ORDER.forEach(function (f) { FINAL_SET[f] = true })
+
+  var FINAL_LABEL = { ve: 'üe', v: 'ü' }
+
+  var SCHEMES = {
+    flypy: {
+      name: '小鹤双拼',
+      zero: 'natural',
+      initials: { zh: 'v', ch: 'i', sh: 'u' },
+      finals: {
+        a: 'a', o: 'o', e: 'e', i: 'i', u: 'u', v: 'v',
+        ai: 'd', ei: 'w', ao: 'c', ou: 'z', an: 'j', en: 'f',
+        ang: 'h', eng: 'g',
+        ia: 'x', ie: 'p', iao: 'n', iu: 'q', ian: 'm', in: 'b',
+        iang: 'l', ing: 'k', iong: 's', ong: 's',
+        ua: 'x', uo: 'o', uai: 'k', ui: 'v', uan: 'r', un: 'y', uang: 'l',
+        ue: 't', ve: 't',
+      },
+    },
+    zrm: {
+      name: '自然码',
+      zero: 'natural',
+      initials: { zh: 'v', ch: 'i', sh: 'u' },
+      finals: {
+        a: 'a', o: 'o', e: 'e', i: 'i', u: 'u', v: 'v',
+        ai: 'l', ei: 'z', ao: 'k', ou: 'b', an: 'j', en: 'f',
+        ang: 'h', eng: 'g',
+        ia: 'w', ie: 'x', iao: 'c', iu: 'q', ian: 'm', in: 'n',
+        iang: 'd', ing: 'y', iong: 's', ong: 's',
+        ua: 'w', uo: 'o', uai: 'y', ui: 'v', uan: 'r', un: 'p', uang: 'd',
+        ue: 't', ve: 't',
+      },
+    },
+    mspy: {
+      name: '微软双拼',
+      zero: 'o',
+      initials: { zh: 'v', ch: 'i', sh: 'u' },
+      finals: {
+        a: 'a', o: 'o', e: 'e', i: 'i', u: 'u', v: 'y',
+        ai: 'l', ei: 'z', ao: 'k', ou: 'b', an: 'j', en: 'f',
+        ang: 'h', eng: 'g', er: 'r',
+        ia: 'w', ie: 'x', iao: 'c', iu: 'q', ian: 'm', in: 'n',
+        iang: 'd', ing: ';', iong: 's', ong: 's',
+        ua: 'w', uo: 'o', uai: 'y', ui: 'v', uan: 'r', un: 'p', uang: 'd',
+        ue: 't', ve: 't',
+      },
+    },
+    abc: {
+      name: '智能ABC',
+      zero: 'o',
+      initials: { zh: 'a', ch: 'e', sh: 'v' },
+      finals: {
+        a: 'a', o: 'o', e: 'e', i: 'i', u: 'u', v: 'v',
+        ai: 'l', ei: 'q', ao: 'k', ou: 'b', an: 'j', en: 'f',
+        ang: 'h', eng: 'g', er: 'r',
+        ia: 'd', ie: 'x', iao: 'z', iu: 'r', ian: 'w', in: 'c',
+        iang: 't', ing: 'y', iong: 's', ong: 's',
+        ua: 'd', uo: 'o', uai: 'c', ui: 'm', uan: 'p', un: 'n', uang: 't',
+        ue: 'm', ve: 'm',
+      },
+    },
+    pyjj: {
+      name: '拼音加加',
+      zero: 'o',
+      initials: { zh: 'v', ch: 'u', sh: 'i' },
+      finals: {
+        a: 'a', o: 'o', e: 'e', i: 'i', u: 'u', v: 'v',
+        ai: 's', ei: 'w', ao: 'd', ou: 'p', an: 'f', en: 'r',
+        ang: 'g', eng: 't', er: 'q',
+        ia: 'b', ie: 'm', iao: 'k', iu: 'n', ian: 'j', in: 'l',
+        iang: 'h', ing: 'q', iong: 'y', ong: 'y',
+        ua: 'b', uo: 'o', uai: 'x', ui: 'v', uan: 'c', un: 'z', uang: 'h',
+        ue: 'x', ve: 'x',
+      },
+    },
+  }
+
+  var DEFAULT_ZERO = 'natural'
+  var DEFAULT_INITIALS = { zh: 'v', ch: 'i', sh: 'u' }
+
+  /** 拼音声调字母 → 无调字母 */
+  var TONE = {
+    'ā': 'a', 'á': 'a', 'ǎ': 'a', 'à': 'a',
+    'ē': 'e', 'é': 'e', 'ě': 'e', 'è': 'e', 'ê': 'e',
+    'ī': 'i', 'í': 'i', 'ǐ': 'i', 'ì': 'i',
+    'ō': 'o', 'ó': 'o', 'ǒ': 'o', 'ò': 'o',
+    'ū': 'u', 'ú': 'u', 'ǔ': 'u', 'ù': 'u',
+    'ǖ': 'v', 'ǘ': 'v', 'ǚ': 'v', 'ǜ': 'v', 'ü': 'v',
+    'ń': 'n', 'ň': 'n', 'ǹ': 'n', 'ḿ': 'm',
+  }
+
+  var PINYIN_INITIALS = 'bpmfdtnlgkhjqxrzcsyw'
+  var INITIAL_NOTE_ORDER = ['zh', 'ch', 'sh']
+
+  function finalLabel(f) {
+    return FINAL_LABEL[f] || f
+  }
+
+  /** 校验并规整一份自定义键位表：只保留合法韵母，键位取单个可见字符 */
+  function normalizeCustom(raw) {
+    var out = { finals: {}, initials: {}, zero: DEFAULT_ZERO }
+    if (!raw || typeof raw !== 'object') return out
+    var finals = raw.finals && typeof raw.finals === 'object' ? raw.finals : {}
+    FINAL_ORDER.forEach(function (final) {
+      var key = finals[final]
+      if (typeof key === 'string' && key.length === 1) out.finals[final] = key.toLowerCase()
+    })
+    var initials = raw.initials && typeof raw.initials === 'object' ? raw.initials : {}
+    INITIAL_NOTE_ORDER.forEach(function (initial) {
+      var key = initials[initial]
+      if (typeof key === 'string' && key.length === 1) out.initials[initial] = key.toLowerCase()
+    })
+    if (raw.zero === 'o' || raw.zero === 'natural') out.zero = raw.zero
+    return out
+  }
+
+  /** 自定义键位是否可用（至少要覆盖全部韵母） */
+  /**
+   * 自定义键位是否完整：natural 零声母方案里 er 由零声母规则直接照全拼，
+   * 不需要韵母键位；o 打头的方案则每个韵母（含 er）都必须有键。
+   */
+  function isCustomComplete(custom) {
+    if (!custom || !custom.finals) return false
+    var zero = custom.zero === 'o' ? 'o' : 'natural'
+    for (var i = 0; i < FINAL_ORDER.length; i += 1) {
+      var final = FINAL_ORDER[i]
+      if (final === 'er' && zero === 'natural') continue
+      if (!custom.finals[final]) return false
+    }
+    return true
+  }
+
+  /** 以某内置方案为模板，生成一份可直接编辑的自定义键位 */
+  function customFrom(name) {
+    var base = SCHEMES[name] || SCHEMES.flypy
+    var finals = {}
+    FINAL_ORDER.forEach(function (final) { finals[final] = base.finals[final] || '' })
+    return { finals: finals, initials: Object.assign({}, base.initials), zero: base.zero, from: base.name }
+  }
+
+  /** 解析当前生效方案（含自定义回退） */
+  function schemeOf(prefs) {
+    var name = prefs && prefs.scheme
+    if (name === 'custom') {
+      var custom = normalizeCustom(prefs.custom)
+      if (isCustomComplete(custom)) {
+        return {
+          id: 'custom',
+          name: '自定义',
+          zero: custom.zero,
+          initials: Object.assign({}, DEFAULT_INITIALS, custom.initials),
+          finals: custom.finals,
+        }
+      }
+    }
+    var builtin = SCHEMES[name]
+    if (builtin) return Object.assign({ id: name }, builtin)
+    return Object.assign({ id: 'flypy' }, SCHEMES.flypy)
+  }
+
+  /** 韵母 → 键位（未映射的韵母返回 ''） */
+  function finalKey(final, sch) {
+    if (!sch || !sch.finals) return ''
+    return Object.prototype.hasOwnProperty.call(sch.finals, final) ? sch.finals[final] : ''
+  }
+
+  /** 声母 → 键位（单字母声母固定映射到自身） */
+  function initialKey(initial, sch) {
+    if (sch && sch.initials && Object.prototype.hasOwnProperty.call(sch.initials, initial)) {
+      return sch.initials[initial]
+    }
+    return initial
+  }
+
+  /**
+   * initial + final → 双拼码；initial 为空表示零声母（各方案规则不同）
+   * 返回 '' 表示该韵母在本方案里没有键位。
+   *
+   * natural 零声母（小鹤/自然码）不依赖韵母表：双字母直接照全拼（爱 ai、安 an、而 er），
+   * 所以 er 这类只在零声母出现的韵母无需在 finals 里占一个键位。
+   */
+  function codeOf(initial, final, sch) {
+    if (initial === '' && sch && sch.zero === 'natural') {
+      if (final.length === 2) return final
+      if (final.length === 1) return final + final
+      var head = finalKey(final, sch)
+      return head ? final.charAt(0) + head : ''
+    }
+    var fk = finalKey(final, sch)
+    if (!fk) return ''
+    if (initial === '') return 'o' + fk
+    return initialKey(initial, sch) + fk
+  }
+
+  /** 整音节（拼音串）→ 双拼码，无法解析时返回 '' */
+  function codeOfPinyin(pinyin, sch) {
+    var parsed = parsePinyin(pinyin)
+    return parsed ? codeOf(parsed.i, parsed.f, sch) : ''
+  }
+
+  /** 键 → 韵母列表（按 FINAL_ORDER 排序，用于键帽显示；ve 与 ue 同键，不重复列出） */
+  function reverseFinals(sch) {
+    var map = {}
+    FINAL_ORDER.forEach(function (final) {
+      if (final === 've') return
+      var key = finalKey(final, sch)
+      if (!key) return
+      if (!map[key]) map[key] = []
+      map[key].push(final)
+    })
+    return map
+  }
+
+  /** 键 → 声母列表（该键同时作为 zh/ch/sh 的键位时） */
+  function reverseInitials(sch) {
+    var map = {}
+    INITIAL_NOTE_ORDER.forEach(function (initial) {
+      var key = initialKey(initial, sch)
+      if (!map[key]) map[key] = []
+      map[key].push(initial)
+    })
+    return map
+  }
+
+  /** 把带声调的拼音拆成 { i: 声母, f: 韵母 } */
+  function parsePinyin(raw) {
+    var text = String(raw || '').toLowerCase()
+    var plain = ''
+    for (var i = 0; i < text.length; i += 1) {
+      var ch = text.charAt(i)
+      plain += TONE[ch] !== undefined ? TONE[ch] : ch
+    }
+    plain = plain.replace(/[^a-z]/g, '')
+    if (!plain) return null
+    var initial = ''
+    var rest = plain
+    var head = plain.slice(0, 2)
+    if (head === 'zh' || head === 'ch' || head === 'sh') {
+      initial = head
+      rest = plain.slice(2)
+    } else if (PINYIN_INITIALS.indexOf(plain.charAt(0)) >= 0) {
+      initial = plain.charAt(0)
+      rest = plain.slice(1)
+    }
+    if (!rest) return null
+    if (rest === 'u' && 'jqxy'.indexOf(initial) >= 0) rest = 'v'
+    if (!FINAL_SET[rest]) return null
+    return { i: initial, f: rest }
+  }
+
+  /** 预编辑串里最后一个能解析成拼音音节的片段（多音节/带 ' 分隔时取最后一段） */
+  function longestSuffixPinyin(value) {
+    var text = String(value || '').toLowerCase()
+    var lastSeg = text.slice(text.lastIndexOf("'") + 1)
+    for (var start = 0; start < lastSeg.length; start += 1) {
+      var parsed = parsePinyin(lastSeg.slice(start))
+      if (parsed) return parsed
+    }
+    return null
+  }
+
+  /** 把预编辑串按拼音音节贪心切分；complete=false 表示末尾是不完整的音节 */
+  function parseSyllables(value, sch) {
+    var text = String(value || '').toLowerCase()
+    var seg = text.slice(text.lastIndexOf("'") + 1)
+    var syllables = []
+    var start = 0
+    while (start < seg.length) {
+      var matched = null
+      for (var end = seg.length; end > start; end -= 1) {
+        var parsed = parsePinyin(seg.slice(start, end))
+        if (parsed) {
+          matched = { parsed: parsed, len: end - start }
+          break
+        }
+      }
+      if (!matched) break
+      syllables.push(matched.parsed)
+      start += matched.len
+    }
+    return {
+      syllables: syllables,
+      complete: seg.length > 0 && start === seg.length,
+      initial: seg.charAt(0),
+      sch: sch || null,
+    }
+  }
+
+  return {
+    FINAL_ORDER: FINAL_ORDER,
+    FINAL_LABEL: FINAL_LABEL,
+    INITIAL_NOTE_ORDER: INITIAL_NOTE_ORDER,
+    SCHEMES: SCHEMES,
+    DEFAULT_ZERO: DEFAULT_ZERO,
+    DEFAULT_INITIALS: DEFAULT_INITIALS,
+    finalLabel: finalLabel,
+    normalizeCustom: normalizeCustom,
+    isCustomComplete: isCustomComplete,
+    customFrom: customFrom,
+    schemeOf: schemeOf,
+    finalKey: finalKey,
+    initialKey: initialKey,
+    codeOf: codeOf,
+    codeOfPinyin: codeOfPinyin,
+    reverseFinals: reverseFinals,
+    reverseInitials: reverseInitials,
+    parsePinyin: parsePinyin,
+    longestSuffixPinyin: longestSuffixPinyin,
+    parseSyllables: parseSyllables,
+  }
+})()
+
+if (typeof module === 'object' && module.exports) module.exports = SchemeLib
+
+
 window.__ModuleLoader__.load({
   id: '@local/xiaohe-shuangpin-reminder',
   factory(require) {
@@ -7,72 +347,38 @@ window.__ModuleLoader__.load({
     const PREF_KEY = 'dsh.xiaohe-shuangpin.prefs.v4'
     const STAT_KEY = 'dsh.xiaohe-shuangpin.stats.v2'
 
-    /* ================= 小鹤双拼规则（Rime double_pinyin_flypy） ================= */
-    const INITIAL_KEY = { zh: 'v', ch: 'i', sh: 'u' }
-    const FINAL_KEY = {
-      a: 'a', o: 'o', e: 'e', i: 'i', u: 'u', v: 'v',
-      ai: 'd', ei: 'w', ao: 'c', ou: 'z', an: 'j', en: 'f',
-      ang: 'h', eng: 'g', er: 'r',
-      ia: 'x', ie: 'p', iao: 'n', iu: 'q', ian: 'm', in: 'b',
-      iang: 'l', ing: 'k', iong: 's', ong: 's',
-      ua: 'x', uo: 'o', uai: 'k', ui: 'v', uan: 'r', un: 'y', uang: 'l',
-      ue: 't', ve: 't',
-    }
-    const FINAL_LABEL = { ve: 'üe', v: 'ü' }
-    const TONE = {
-      'ā': 'a', 'á': 'a', 'ǎ': 'a', 'à': 'a',
-      'ē': 'e', 'é': 'e', 'ě': 'e', 'è': 'e', 'ê': 'e',
-      'ī': 'i', 'í': 'i', 'ǐ': 'i', 'ì': 'i',
-      'ō': 'o', 'ó': 'o', 'ǒ': 'o', 'ò': 'o',
-      'ū': 'u', 'ú': 'u', 'ǔ': 'u', 'ù': 'u',
-      'ǖ': 'v', 'ǘ': 'v', 'ǚ': 'v', 'ǜ': 'v', 'ü': 'v',
-      'ń': 'n', 'ň': 'n', 'ǹ': 'n', 'ḿ': 'm',
-    }
+    /* ================= 双拼方案（数据层见 src/schemes.cjs，构建时内联） ================= */
+    const FINAL_ORDER = SchemeLib.FINAL_ORDER
+    const SCHEMES = SchemeLib.SCHEMES
+    const finalLabel = SchemeLib.finalLabel
+    const schemeOf = SchemeLib.schemeOf
+    const finalKey = SchemeLib.finalKey
+    const initialKey = SchemeLib.initialKey
+    const codeOf = SchemeLib.codeOf
+    const reverseFinals = SchemeLib.reverseFinals
+    const reverseInitials = SchemeLib.reverseInitials
+    const parsePinyin = SchemeLib.parsePinyin
+    const longestSuffixPinyin = SchemeLib.longestSuffixPinyin
+    const parseSyllables = SchemeLib.parseSyllables
+    const normalizeCustom = SchemeLib.normalizeCustom
+    const isCustomComplete = SchemeLib.isCustomComplete
+    const customFrom = SchemeLib.customFrom
+    const INITIAL_NOTE_ORDER = SchemeLib.INITIAL_NOTE_ORDER
+    /** 内置方案顺序（下拉菜单展示顺序） */
+    const SCHEME_IDS = ['flypy', 'zrm', 'mspy', 'abc', 'pyjj']
 
-    function finalLabel(f) {
-      return FINAL_LABEL[f] || f
+    /** 零声母规则说明文案 */
+    function zeroHintFor(sch) {
+      if (sch.zero === 'o') {
+        return '零声母：先按 o 再按韵母键（爱 o' + finalKey('ai', sch) + '、安 o' + finalKey('an', sch) + '、而 o' + finalKey('er', sch) + '）'
+      }
+      return '零声母：单字母双写（啊 aa、鹅 ee），双字母照全拼（爱 ai、安 an、而 er），三字母首字母+键（昂 ah）'
     }
-
-    /**
-     * initial + final → 双拼码。initial 为空表示零声母，小鹤规则：
-     * 单字母韵母双写（啊 aa、鹅 ee），双字母韵母照全拼（爱 ai、安 an、欧 ou），
-     * 三字母韵母用「首字母 + 韵母键」（昂 ah、鞥 eg）。
-     */
-    function codeOf(initial, final) {
-      const fk = FINAL_KEY[final]
-      if (!fk) return ''
-      if (initial === '') {
-        if (final.length === 2) return final
-        if (final.length === 1) return final + final
-        return final.charAt(0) + fk
-      }
-      return (INITIAL_KEY[initial] || initial) + fk
-    }
-
-    const PINYIN_INITIALS = 'bpmfdtnlgkhjqxrzcsyw'
-    function parsePinyin(raw) {
-      let text = String(raw || '').toLowerCase()
-      let plain = ''
-      for (let i = 0; i < text.length; i += 1) {
-        const ch = text.charAt(i)
-        plain += TONE[ch] !== undefined ? TONE[ch] : ch
-      }
-      plain = plain.replace(/[^a-z]/g, '')
-      if (!plain) return null
-      let initial = ''
-      let rest = plain
-      const head = plain.slice(0, 2)
-      if (head === 'zh' || head === 'ch' || head === 'sh') {
-        initial = head
-        rest = plain.slice(2)
-      } else if (PINYIN_INITIALS.indexOf(plain.charAt(0)) >= 0) {
-        initial = plain.charAt(0)
-        rest = plain.slice(1)
-      }
-      if (!rest) return null
-      if (rest === 'u' && 'jqxy'.indexOf(initial) >= 0) rest = 'v'
-      if (!Object.prototype.hasOwnProperty.call(FINAL_KEY, rest)) return null
-      return { i: initial, f: rest }
+    /** 声母规则说明文案 */
+    function initialsHintFor(sch) {
+      return '声母：' + INITIAL_NOTE_ORDER.map(function (i) {
+        return i + '=' + initialKey(i, sch)
+      }).join(' · ')
     }
 
     /* ================= 常用字拼音表（GB2312 一级字表 3755 字） ================= */
@@ -91,49 +397,64 @@ window.__ModuleLoader__.load({
       return DICT.get(ch) || ''
     }
 
-    function codeOfChar(ch) {
+    function codeOfChar(ch, sch) {
       const pinyin = pinyinOf(ch)
       if (!pinyin) return ''
       const parsed = parsePinyin(pinyin)
-      return parsed ? codeOf(parsed.i, parsed.f) : ''
+      return parsed ? codeOf(parsed.i, parsed.f, sch) : ''
     }
 
     /* ================= 键位表 ================= */
-    const KEY_ROWS = [
-      [
-        { k: 'Q', f: ['iu'], ex: [{ h: '求', p: 'qiú', i: 'q', f: 'iu' }] },
-        { k: 'W', f: ['ei'], ex: [{ h: '杯', p: 'bēi', i: 'b', f: 'ei' }] },
-        { k: 'E', f: ['e'], ex: [{ h: '饿', p: 'è', i: '', f: 'e' }] },
-        { k: 'R', f: ['uan'], ex: [{ h: '转', p: 'zhuǎn', i: 'zh', f: 'uan' }] },
-        { k: 'T', f: ['ue'], ex: [{ h: '学', p: 'xué', i: 'x', f: 'ue' }] },
-        { k: 'Y', f: ['un'], ex: [{ h: '云', p: 'yún', i: 'y', f: 'un' }] },
-        { k: 'U', f: ['u'], s: 'sh', ex: [{ h: '是', p: 'shì', i: 'sh', f: 'i' }, { h: '书', p: 'shū', i: 'sh', f: 'u' }] },
-        { k: 'I', f: ['i'], s: 'ch', ex: [{ h: '吃', p: 'chī', i: 'ch', f: 'i' }] },
-        { k: 'O', f: ['uo', 'o'], ex: [{ h: '多', p: 'duō', i: 'd', f: 'uo' }, { h: '哦', p: 'ó', i: '', f: 'o' }] },
-        { k: 'P', f: ['ie'], ex: [{ h: '写', p: 'xiě', i: 'x', f: 'ie' }] },
-      ],
-      [
-        { k: 'A', f: ['a'], ex: [{ h: '大', p: 'dà', i: 'd', f: 'a' }] },
-        { k: 'S', f: ['ong', 'iong'], ex: [{ h: '中', p: 'zhōng', i: 'zh', f: 'ong' }, { h: '穷', p: 'qióng', i: 'q', f: 'iong' }] },
-        { k: 'D', f: ['ai'], ex: [{ h: '买', p: 'mǎi', i: 'm', f: 'ai' }] },
-        { k: 'F', f: ['en'], ex: [{ h: '人', p: 'rén', i: 'r', f: 'en' }] },
-        { k: 'G', f: ['eng'], ex: [{ h: '能', p: 'néng', i: 'n', f: 'eng' }] },
-        { k: 'H', f: ['ang'], ex: [{ h: '上', p: 'shàng', i: 'sh', f: 'ang' }] },
-        { k: 'J', f: ['an'], ex: [{ h: '看', p: 'kàn', i: 'k', f: 'an' }] },
-        { k: 'K', f: ['ing', 'uai'], ex: [{ h: '平', p: 'píng', i: 'p', f: 'ing' }, { h: '快', p: 'kuài', i: 'k', f: 'uai' }] },
-        { k: 'L', f: ['iang', 'uang'], ex: [{ h: '想', p: 'xiǎng', i: 'x', f: 'iang' }, { h: '双', p: 'shuāng', i: 'sh', f: 'uang' }] },
-      ],
-      [
-        { k: 'Z', f: ['ou'], ex: [{ h: '走', p: 'zǒu', i: 'z', f: 'ou' }] },
-        { k: 'X', f: ['ia', 'ua'], ex: [{ h: '下', p: 'xià', i: 'x', f: 'ia' }, { h: '花', p: 'huā', i: 'h', f: 'ua' }] },
-        { k: 'C', f: ['ao'], ex: [{ h: '好', p: 'hǎo', i: 'h', f: 'ao' }] },
-        { k: 'V', f: ['ui', 'v'], s: 'zh', ex: [{ h: '中', p: 'zhōng', i: 'zh', f: 'ong' }, { h: '会', p: 'huì', i: 'h', f: 'ui' }] },
-        { k: 'B', f: ['in'], ex: [{ h: '心', p: 'xīn', i: 'x', f: 'in' }] },
-        { k: 'N', f: ['iao'], ex: [{ h: '小', p: 'xiǎo', i: 'x', f: 'iao' }] },
-        { k: 'M', f: ['ian'], ex: [{ h: '天', p: 'tiān', i: 't', f: 'ian' }] },
-      ],
+    /**
+     * 键位行的物理布局（三行）。键位含义不再写死，而是按当前方案从韵母表反查，
+     * 见 buildKeyRows：换方案时键帽上的韵母、示例字、声母标记都会跟着变。
+     */
+    const KEY_LAYOUT = [
+      ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+      ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+      ['Z', 'X', 'C', 'V', 'B', 'N', 'M'],
     ]
 
+    /** 每个韵母配一个常用示例字（与方案无关，仅用于键帽提示） */
+    const FINAL_EXAMPLE = {
+      a: ['大', 'dà'], o: ['哦', 'ó'], e: ['饿', 'è'], i: ['衣', 'yī'], u: ['书', 'shū'], v: ['女', 'nǚ'],
+      ai: ['买', 'mǎi'], ei: ['杯', 'bēi'], ao: ['好', 'hǎo'], ou: ['走', 'zǒu'],
+      an: ['看', 'kàn'], en: ['人', 'rén'], ang: ['上', 'shàng'], eng: ['能', 'néng'], er: ['而', 'ér'],
+      ia: ['下', 'xià'], ie: ['写', 'xiě'], iao: ['小', 'xiǎo'], iu: ['求', 'qiú'],
+      ian: ['天', 'tiān'], in: ['心', 'xīn'], iang: ['想', 'xiǎng'], ing: ['平', 'píng'],
+      iong: ['穷', 'qióng'], ong: ['中', 'zhōng'],
+      ua: ['花', 'huā'], uo: ['多', 'duō'], uai: ['快', 'kuài'], ui: ['会', 'huì'],
+      uan: ['转', 'zhuǎn'], un: ['云', 'yún'], uang: ['双', 'shuāng'], ue: ['学', 'xué'], ve: ['略', 'lüè'],
+    }
+
+    /** 按方案生成键帽数据：{ k, f:[韵母], s:声母标记, ex:[{h,p,i,f}] } */
+    function buildKeyRows(sch) {
+      const byFinal = reverseFinals(sch)
+      const byInitial = reverseInitials(sch)
+      return KEY_LAYOUT.map(function (letters) {
+        return letters.map(function (letter) {
+          const key = letter.toLowerCase()
+          const finals = byFinal[key] || []
+          const initials = byInitial[key] || []
+          const ex = []
+          finals.forEach(function (final) {
+            const sample = FINAL_EXAMPLE[final]
+            if (!sample) return
+            const parsed = parsePinyin(sample[1])
+            if (!parsed) return
+            ex.push({ h: sample[0], p: sample[1], i: parsed.i, f: parsed.f, code: codeOf(parsed.i, parsed.f, sch) })
+          })
+          return {
+            k: letter,
+            f: finals,
+            s: initials.length ? initials.join('/') : '',
+            ex: ex,
+          }
+        })
+      })
+    }
+
+    /** 练习题库（与方案无关）：每项的 code 在取用时按当前方案计算，见 withCode */
     const DRILL_RAW = [
       ['杯', 'bēi', 'b', 'ei'], ['我', 'wǒ', 'w', 'o'], ['你', 'nǐ', 'n', 'i'],
       ['好', 'hǎo', 'h', 'ao'], ['是', 'shì', 'sh', 'i'], ['不', 'bù', 'b', 'u'],
@@ -158,17 +479,33 @@ window.__ModuleLoader__.load({
       ['绿', 'lǜ', 'l', 'v'], ['略', 'lüè', 'l', 've'], ['军', 'jūn', 'j', 'un'],
       ['熊', 'xióng', 'x', 'iong'], ['花', 'huā', 'h', 'ua'], ['写', 'xiě', 'x', 'ie'],
     ]
-    const DRILL = DRILL_RAW.map(function (row) {
-      return { h: row[0], p: row[1], i: row[2], f: row[3], code: codeOf(row[2], row[3]) }
-    }).filter(function (item) { return item.code.length === 2 })
+
+    /** 给条目补上当前方案的 code；方案里没有该韵母的键位则丢弃 */
+    function withCode(list, sch) {
+      const out = []
+      for (let i = 0; i < list.length; i += 1) {
+        const item = list[i]
+        const code = codeOf(item.i, item.f, sch)
+        if (code.length !== 2) continue
+        out.push(Object.assign({}, item, { code: code }))
+      }
+      return out
+    }
+
+    /** 内置练习题库（按方案计算后的结果，调用方按方案缓存） */
+    function drillItems(sch) {
+      return withCode(DRILL_RAW.map(function (row) {
+        return { h: row[0], p: row[1], i: row[2], f: row[3] }
+      }), sch)
+    }
 
     /* ================= 文案 ================= */
     const ZH = {
-      title: '小鹤',
+      title: '双拼键位提醒',
       tabMap: '键位',
       tabDrill: '练习',
       tabStats: '记录',
-      open: '打开小鹤双拼',
+      open: '打开双拼键位提醒',
       minimize: '收起',
       opacity: '透明度',
       lock: '固定面板（内容可选中）',
@@ -219,13 +556,27 @@ window.__ModuleLoader__.load({
       fast: '顺',
       keyTimes: '{n} 次 · 卡 {bad} 次',
       dataNote: '只存在本机',
+      schemeLabel: '方案',
+      schemeCustom: '自定义…',
+      customEdit: '改键位',
+      customTitle: '自定义键位',
+      customHint: '点格子改键',
+      customTemplate: '以…为模板',
+      customZero: '零声母',
+      zeroNatural: '照全拼',
+      zeroO: 'o 打头',
+      customIncomplete: '还有韵母没配键位',
+      customKeys: '已用 {n} 个键',
+      customReset: '按当前方案重置',
+      customCancel: '取消',
+      customApply: '保存并启用',
     }
     const EN = {
-      title: 'Xiaohe',
+      title: 'Shuangpin Keys',
       tabMap: 'Keys',
       tabDrill: 'Drill',
       tabStats: 'Log',
-      open: 'Open Xiaohe Shuangpin',
+      open: 'Open Shuangpin Keys',
       minimize: 'Minimize',
       opacity: 'Opacity',
       lock: 'Pin panel (text selectable)',
@@ -276,6 +627,20 @@ window.__ModuleLoader__.load({
       fast: 'smooth',
       keyTimes: '{n} times · {bad} stalls',
       dataNote: 'local only',
+      schemeLabel: 'Scheme',
+      schemeCustom: 'Custom…',
+      customEdit: 'Edit keys',
+      customTitle: 'Custom key mapping',
+      customHint: 'Click a cell to rebind',
+      customTemplate: 'Start from',
+      customZero: 'No initial',
+      zeroNatural: 'spell out',
+      zeroO: 'o prefix',
+      customIncomplete: 'Some finals have no key yet',
+      customKeys: '{n} keys used',
+      customReset: 'Reset from current scheme',
+      customCancel: 'Cancel',
+      customApply: 'Save & use',
     }
     const FALLBACK = ZH
 
@@ -381,6 +746,9 @@ window.__ModuleLoader__.load({
     const DEFAULT_PREFS = {
       open: false, surface: 'dock', x: null, y: null, w: 520, opacity: 0.95, locked: false,
       tab: 'map', autoHint: true, hints: false, pool: 'common',
+      // 方案：内置 id 或 'custom'；custom 为 { finals, initials, zero }
+      scheme: 'flypy',
+      custom: null,
     }
     const MIN_W = 340
     const MAX_W = 1720
@@ -417,7 +785,7 @@ window.__ModuleLoader__.load({
       const state = {
         prefs: prefs,
         stats: normalizeStats(storedStats),
-        ui: { live: null, anchor: null },
+        ui: { live: null, anchor: null, customOpen: false },
       }
       const listeners = new Set()
       let saveTimer = null
@@ -468,29 +836,22 @@ window.__ModuleLoader__.load({
       if (st.echo.length > 30) st.echo.length = 30
     }
 
-    /** 预编辑串里最后一个能解析成拼音音节的片段（多音节/带 ' 分隔时取最后一段） */
-    function longestSuffixPinyin(value) {
-      const text = String(value || '').toLowerCase()
-      const lastSeg = text.slice(text.lastIndexOf("'") + 1)
-      for (let start = 0; start < lastSeg.length; start += 1) {
-        const parsed = parsePinyin(lastSeg.slice(start))
-        if (parsed) return parsed
-      }
-      return null
-    }
-
     /**
      * 从预编辑轨迹里推断「按键混淆」：
      * 轨迹中一旦出现变短（退格），被删掉的后缀就是按错的键；
      * 用「退格前的状态」解析出当时按到的韵母键，和最终上屏音节的正确键对比。
      * 仅在输入法预编辑暴露拼音时可用（码类预编辑解析不出拼音，只留轨迹）。
+     *
+     * 用完整双拼码的第二个字符比较，零声母音节（爱 ai、而 er）也因此能正确归因。
      */
-    function confusionPairs(trace, finalValue) {
+    function confusionPairs(trace, finalValue, sch) {
       const out = []
       if (!finalValue) return out
       const finalParsed = longestSuffixPinyin(finalValue)
       if (!finalParsed) return out
-      const correctKey = FINAL_KEY[finalParsed.f]
+      const correctCode = codeOf(finalParsed.i, finalParsed.f, sch)
+      if (correctCode.length !== 2) return out
+      const correctKey = correctCode.charAt(1)
       for (let i = 0; i + 1 < trace.length; i += 1) {
         const before = trace[i]
         const after = trace[i + 1]
@@ -498,15 +859,18 @@ window.__ModuleLoader__.load({
         const candidate = after + before.slice(after.length)
         const parsed = longestSuffixPinyin(candidate)
         if (!parsed || parsed.i !== finalParsed.i) continue
-        const pressed = FINAL_KEY[parsed.f]
-        if (pressed && pressed !== correctKey) out.push({ correct: correctKey, pressed: pressed })
+        const pressedCode = codeOf(parsed.i, parsed.f, sch)
+        if (pressedCode.length !== 2) continue
+        const pressed = pressedCode.charAt(1)
+        if (pressed !== correctKey) out.push({ correct: correctKey, pressed: pressed })
       }
       return out
     }
 
     /** 字级二元统计：上一个字 → 下一个最可能打的字 */
-    function predictNext(stats, fromChar) {
+    function predictNext(stats, prefs, fromChar) {
       if (!fromChar) return []
+      const sch = schemeOf(prefs)
       const bigram = stats.bigram || {}
       const out = []
       const seen = {}
@@ -530,7 +894,7 @@ window.__ModuleLoader__.load({
       return out.slice(0, 3).map(function (item) {
         const pinyin = pinyinOf(item.ch)
         const parsed = parsePinyin(pinyin)
-        return { ch: item.ch, p: pinyin, code: parsed ? codeOf(parsed.i, parsed.f) : '' }
+        return { ch: item.ch, p: pinyin, code: parsed ? codeOf(parsed.i, parsed.f, sch) : '' }
       }).filter(function (item) { return item.code.length === 2 })
     }
 
@@ -605,32 +969,6 @@ window.__ModuleLoader__.load({
       y: '要也有于一用又因应云',
     }
 
-    /** 把预编辑串按拼音音节贪心切分；complete=false 表示末尾是不完整的音节 */
-    function parseSyllables(value) {
-      const text = String(value || '').toLowerCase()
-      const seg = text.slice(text.lastIndexOf("'") + 1)
-      const syllables = []
-      let start = 0
-      while (start < seg.length) {
-        let matched = null
-        for (let end = seg.length; end > start; end -= 1) {
-          const parsed = parsePinyin(seg.slice(start, end))
-          if (parsed) {
-            matched = { parsed: parsed, len: end - start }
-            break
-          }
-        }
-        if (!matched) break
-        syllables.push(matched.parsed)
-        start += matched.len
-      }
-      return {
-        syllables: syllables,
-        complete: seg.length > 0 && start === seg.length,
-        initial: seg.charAt(0),
-      }
-    }
-
     function recordCommit(store, text, ms, backs, extra) {
       const info = extra || {}
       const chars = Array.from(String(text || '')).filter(function (ch) {
@@ -641,10 +979,11 @@ window.__ModuleLoader__.load({
       const unit = Math.max(40, Math.min(8000, ms / Math.max(1, chars.length)))
       st.base = Math.max(140, Math.min(1600, st.base * 0.85 + unit * 0.15))
       const slow = unit > st.base * 1.5 + 120 || backs >= 2
+      const sch = schemeOf(store.state.prefs)
       const codes = []
       for (let i = 0; i < chars.length; i += 1) {
         const ch = chars[i]
-        const code = codeOfChar(ch)
+        const code = codeOfChar(ch, sch)
         codes.push(code.length === 2 ? code : null)
         if (code.length !== 2) continue
         const entry = st.chars[ch] || (st.chars[ch] = { n: 0, ms: 0, bad: 0, at: 0 })
@@ -700,7 +1039,7 @@ window.__ModuleLoader__.load({
     }
 
     /** 每个键的 { n, bad }：真实输入按字累积 + 练习按次累积 */
-    function keyStatsOf(stats) {
+    function keyStatsOf(stats, sch) {
       const map = {}
       function bump(key, n, bad) {
         const entry = map[key] || (map[key] = { n: 0, bad: 0 })
@@ -710,7 +1049,7 @@ window.__ModuleLoader__.load({
       const chars = stats.chars || {}
       for (const ch in chars) {
         const entry = chars[ch]
-        const code = codeOfChar(ch)
+        const code = codeOfChar(ch, sch)
         if (code.length !== 2) continue
         bump(code.charAt(0), entry.n, entry.bad)
         bump(code.charAt(1), entry.n, entry.bad)
@@ -746,7 +1085,7 @@ window.__ModuleLoader__.load({
       return n
     }
 
-    function personalItems(stats) {
+    function personalItems(stats, sch) {
       const items = []
       const chars = stats.chars || {}
       for (const ch in chars) {
@@ -756,7 +1095,7 @@ window.__ModuleLoader__.load({
         if (!pinyin) continue
         const parsed = parsePinyin(pinyin)
         if (!parsed) continue
-        const code = codeOf(parsed.i, parsed.f)
+        const code = codeOf(parsed.i, parsed.f, sch)
         if (code.length !== 2) continue
         items.push({ h: ch, p: pinyin, i: parsed.i, f: parsed.f, code: code, bad: entry.bad, n: entry.n })
       }
@@ -764,17 +1103,18 @@ window.__ModuleLoader__.load({
       return items.slice(0, 40)
     }
 
-    function poolItems(stats, pool) {
+    function poolItems(stats, sch, pool) {
+      const base = drillItems(sch)
       if (pool === 'mine') {
-        const mine = personalItems(stats)
-        return mine.length ? mine : DRILL
+        const mine = personalItems(stats, sch)
+        return mine.length ? mine : base
       }
-      return DRILL
+      return base
     }
 
-    function pickItem(stats, pool, exclude) {
-      const map = keyStatsOf(stats)
-      const list = poolItems(stats, pool)
+    function pickItem(stats, sch, pool, exclude) {
+      const map = keyStatsOf(stats, sch)
+      const list = poolItems(stats, sch, pool)
       let best = null
       let bestScore = -1
       for (let i = 0; i < list.length; i += 1) {
@@ -789,7 +1129,7 @@ window.__ModuleLoader__.load({
           best = item
         }
       }
-      return best || list[0] || DRILL[0]
+      return best || list[0] || { h: '', p: '', i: '', f: '', code: '' }
     }
 
     /* ================= 输入捕获 ================= */
@@ -853,7 +1193,7 @@ window.__ModuleLoader__.load({
         lastCommitAt = Date.now()
         const chained = Date.now() - chainTime < 8000
         chainTime = Date.now()
-        const confusions = confusionPairs(trace, finalPreedit)
+        const confusions = confusionPairs(trace, finalPreedit, schemeOf(store.state.prefs))
         recordCommit(store, text, elapsed, backs, {
           chained: chained,
           trace: trace,
@@ -951,6 +1291,16 @@ window.__ModuleLoader__.load({
       },
       grip: { color: 'var(--dsw-alias-label-secondary)', fontSize: 13, lineHeight: 1, letterSpacing: 1 },
       title: { fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' },
+      schemeTitle: {
+        appearance: 'none', border: '1px solid transparent', background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)', padding: '2px 16px 2px 2px',
+        borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+        // 自绘下拉箭头，避免依赖原生 select 外观
+        backgroundImage: 'linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%)',
+        backgroundPosition: 'calc(100% - 9px) 55%, calc(100% - 5px) 55%',
+        backgroundSize: '4px 4px, 4px 4px',
+        backgroundRepeat: 'no-repeat',
+      },
       spacer: { flex: '1 1 auto' },
       sliderWrap: { display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--dsw-alias-label-secondary)' },
       slider: { width: 90, accentColor: 'var(--dsw-alias-brand-primary)', cursor: 'pointer' },
@@ -1019,6 +1369,22 @@ window.__ModuleLoader__.load({
       },
       hint: { fontSize: 10.5, lineHeight: 1.55, color: 'var(--dsw-alias-label-secondary)' },
       hintStrong: { color: 'var(--dsw-alias-label-primary)' },
+      hintScheme: { fontSize: 9.5, color: 'var(--dsw-alias-label-secondary)', opacity: 0.75, marginTop: 1 },
+      schemeBar: {
+        display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+        marginBottom: 8, fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)',
+      },
+      schemeSelect: {
+        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)',
+        fontSize: 10.5, padding: '2px 6px', borderRadius: 6,
+        cursor: 'pointer', fontFamily: 'inherit',
+      },
+      schemeAction: {
+        appearance: 'none', border: '1px solid var(--dsw-alias-border-l1)', background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)', fontSize: 10, padding: '2px 7px',
+        borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+      },
       drill: { display: 'flex', flexDirection: 'column', gap: 8 },
       poolRow: { display: 'flex', gap: 6, alignItems: 'center' },
       poolChip: {
@@ -1033,6 +1399,30 @@ window.__ModuleLoader__.load({
       drillPrompt: { display: 'flex', alignItems: 'baseline', gap: 10 },
       drillHan: { fontSize: 34, fontWeight: 600, lineHeight: 1.05 },
       drillPinyin: { fontSize: 13, color: 'var(--dsw-alias-label-secondary)', letterSpacing: 0.4 },
+      customPanel: {
+        display: 'flex', flexDirection: 'column', gap: 6,
+        border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8,
+        padding: '8px 10px', background: 'var(--dsw-alias-bg-layer-1)',
+      },
+      customHead: { display: 'flex', alignItems: 'baseline', gap: 8 },
+      customGrid: {
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(62px, 1fr))',
+        gap: 4,
+      },
+      customRow: { display: 'flex', alignItems: 'flex-end', gap: 6, flexWrap: 'wrap', marginTop: 2 },
+      customCell: { display: 'flex', flexDirection: 'column', gap: 2 },
+      customLabel: { fontSize: 9.5, color: 'var(--dsw-alias-label-secondary)' },
+      customInput: {
+        width: 30, textAlign: 'center', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+        border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 5,
+        background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-primary)',
+        padding: '2px 0',
+      },
+      actionPrimary: {
+        borderColor: 'var(--dsw-alias-brand-primary)',
+        color: 'var(--dsw-alias-brand-primary)',
+      },
+      actionDisabled: { opacity: 0.45, cursor: 'not-allowed' },
       pad: {
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 48,
         borderRadius: 8, border: '1px dashed var(--dsw-alias-border-l2)',
@@ -1117,14 +1507,17 @@ window.__ModuleLoader__.load({
       return flash
     }
 
-    function sampleText(entry) {
-      const code = codeOf(entry.i, entry.f)
+    function sampleText(entry, sch) {
+      if (!entry) return ''
+      const code = codeOf(entry.i, entry.f, sch)
       return code ? entry.h + ' ' + entry.p + ' → ' + code : entry.h + ' ' + entry.p
     }
 
     function Keycap(props) {
       const item = props.item
       const size = props.size
+      const sch = props.sch
+      const finalText = item.f.map(finalLabel).join(' / ')
       const style = Object.assign(
         {},
         S.key,
@@ -1147,12 +1540,12 @@ window.__ModuleLoader__.load({
           onMouseEnter: props.onEnter,
           onMouseLeave: props.onLeave,
           onClick: props.onClick,
-          title: item.k + ' · ' + item.f.map(finalLabel).join(' / ') + ' — ' + sampleText(item.ex[0]),
+          title: item.k + ' · ' + finalText + (item.ex[0] ? ' — ' + sampleText(item.ex[0], sch) : ''),
           'aria-label': item.k + ' ' + item.f.map(finalLabel).join(' '),
         },
         h('span', { style: Object.assign({}, S.keyLetter, { fontSize: Math.max(8, Math.min(18, size.w * 0.2)) }) }, item.k),
         item.s ? h('span', { style: Object.assign({}, S.keyInitial, { fontSize: Math.max(8, Math.min(18, size.w * 0.19)) }) }, item.s) : null,
-        h('span', { style: finalStyle }, item.f.map(finalLabel).join(' / ')),
+        h('span', { style: finalStyle }, finalText),
         props.predict && props.predict.ch
           ? h('span', {
               style: Object.assign(
@@ -1186,7 +1579,12 @@ window.__ModuleLoader__.load({
       const live = props.live
       const reveal = props.reveal !== false
       const [hover, setHover] = React.useState(null)
-      const keyStats = React.useMemo(function () { return keyStatsOf(stats) }, [stats, stats.rev])
+      const sch = React.useMemo(function () { return schemeOf(prefs) }, [prefs.scheme, prefs.custom])
+      const keyStats = React.useMemo(
+        function () { return keyStatsOf(stats, sch) },
+        [stats, stats.rev, sch],
+      )
+      const rowsData = React.useMemo(function () { return buildKeyRows(sch) }, [sch])
       const hotKeys = {}
       if (flash && flash.event && flash.event.codes) {
         flash.event.codes.forEach(function (code) {
@@ -1215,10 +1613,10 @@ window.__ModuleLoader__.load({
       }
       if (live && live.text) {
         const seg = live.text.slice(live.text.lastIndexOf("'") + 1)
-        const info = parseSyllables(seg)
+        const info = parseSyllables(seg, sch)
         info.syllables.forEach(function (parsed) {
-          markPredict(INITIAL_KEY[parsed.i] || parsed.i, '', false)
-          markPredict(FINAL_KEY[parsed.f], '', false)
+          markPredict(initialKey(parsed.i, sch), '', false)
+          markPredict(finalKey(parsed.f, sch), '', false)
         })
         if (!info.complete && seg.charAt(0)) {
           const two = seg.slice(0, 2)
@@ -1230,20 +1628,20 @@ window.__ModuleLoader__.load({
             const pinyin = pinyinOf(ch)
             const parsed = pinyin ? parsePinyin(pinyin) : null
             if (!parsed || parsed.i !== initial) continue
-            markPredict(FINAL_KEY[parsed.f], ch, count === 0)
+            markPredict(finalKey(parsed.f, sch), ch, count === 0)
             count += 1
           }
         }
       } else {
-        predictNext(stats, stats.lastChar).forEach(function (item, index) {
+        predictNext(stats, prefs, stats.lastChar).forEach(function (item, index) {
           const parsed = parsePinyin(item.p)
           if (!parsed) return
-          markPredict(INITIAL_KEY[parsed.i] || parsed.i, item.ch, index === 0)
-          markPredict(FINAL_KEY[parsed.f], '', false)
+          markPredict(initialKey(parsed.i, sch), item.ch, index === 0)
+          markPredict(finalKey(parsed.f, sch), '', false)
         })
       }
 
-      const rows = KEY_ROWS.map(function (row, rowIndex) {
+      const rows = rowsData.map(function (row, rowIndex) {
         return h(
           'div',
           { key: 'row-' + rowIndex, style: { display: 'flex', gap: gap, marginTop: rowIndex ? gap : 0, marginLeft: rowIndex * offset } },
@@ -1253,6 +1651,7 @@ window.__ModuleLoader__.load({
             return h(Keycap, {
               key: item.k,
               item: item,
+              sch: sch,
               size: size,
               hot: hotKeys[key] === true,
               hovered: hover !== null && hover.k === item.k,
@@ -1272,14 +1671,160 @@ window.__ModuleLoader__.load({
         transition: 'opacity 120ms ease',
       }
 
+      // 自定义键位编辑是覆盖式面板（方案切换在标题栏）
+      if (store.state.ui.customOpen) {
+        return h(CustomEditor, { store: store, prefs: prefs, t: t })
+      }
+
       return h(
         'div',
         null,
         h('div', { style: Object.assign({}, S.keyboard, { width: blockW, margin: '0 auto' }) }, rows),
         h('div', { style: chromeFade },
           h('div', { style: S.hint },
-            h('div', null, h('span', { style: S.hintStrong }, t('initialsHint'))),
-            h('div', null, t('zeroHint')))),
+            h('div', null, h('span', { style: S.hintStrong }, initialsHintFor(sch))),
+            h('div', null, zeroHintFor(sch)))),
+      )
+    }
+
+    /**
+     * 自定义键位编辑：以某个内置方案为模板，逐个韵母改键位。
+     * 同一键上多个韵母是正常的（如 ong/iong 共键）。
+     */
+    function CustomEditor(props) {
+      const prefs = props.prefs
+      const store = props.store
+      const t = props.t
+      // 模板来源：已有自定义键位就用它，否则取进编辑器前选中的内置方案
+      const baseId = React.useMemo(function () {
+        if (prefs.custom && prefs.custom.fromId) return prefs.custom.fromId
+        return prefs.scheme === 'custom' ? 'flypy' : (prefs.scheme || 'flypy')
+      }, [])
+      const draft = React.useMemo(function () {
+        if (prefs.custom && prefs.custom.finals) return normalizeCustom(prefs.custom)
+        return customFrom(baseId)
+      }, [])
+      const [template, setTemplate] = React.useState(baseId)
+      const [finals, setFinals] = React.useState(draft.finals)
+      const [initials, setInitials] = React.useState(draft.initials)
+      const [zero, setZero] = React.useState(draft.zero)
+
+      function setFinal(final, value) {
+        const key = String(value || '').toLowerCase().replace(/[^a-z;]/g, '').slice(-1)
+        if (!key) return
+        setFinals(function (prev) {
+          const next = Object.assign({}, prev)
+          next[final] = key
+          return next
+        })
+      }
+      function setInitial(initial, value) {
+        const key = String(value || '').toLowerCase().replace(/[^a-z]/g, '').slice(-1)
+        if (!key) return
+        setInitials(function (prev) {
+          const next = Object.assign({}, prev)
+          next[initial] = key
+          return next
+        })
+      }
+      function apply() {
+        prefs.custom = {
+          finals: finals, initials: initials, zero: zero,
+          fromId: template, from: SCHEMES[template].name,
+        }
+        prefs.scheme = 'custom'
+        store.state.ui.customOpen = false
+        store.touch()
+      }
+      function cancel() {
+        store.state.ui.customOpen = false
+        store.touch()
+      }
+      function resetFrom(id) {
+        const base = customFrom(id || template)
+        setTemplate(id || template)
+        setFinals(base.finals)
+        setInitials(base.initials)
+        setZero(base.zero)
+      }
+
+      const complete = isCustomComplete({ finals: finals, zero: zero })
+      const used = {}
+      FINAL_ORDER.forEach(function (final) {
+        const key = finals[final]
+        if (!key) return
+        used[key] = (used[key] || 0) + 1
+      })
+
+      return h('div', { style: S.customPanel },
+        h('div', { style: S.customHead },
+          h('span', { style: S.sectionTitle }, t('customTitle')),
+          h('span', { style: S.hint }, t('customHint'))),
+        h('div', { style: S.customRow },
+          h('label', { style: S.customCell },
+            h('span', { style: S.customLabel }, t('customTemplate')),
+            h('select', {
+              style: S.schemeSelect,
+              value: template,
+              onChange: function (event) { resetFrom(event.target.value) },
+            },
+              SCHEME_IDS.map(function (id) {
+                return h('option', { key: id, value: id }, SCHEMES[id].name)
+              }),
+            ))),
+        h('div', { style: S.customGrid },
+          FINAL_ORDER.map(function (final) {
+            return h('label', { key: 'f-' + final, style: S.customCell },
+              h('span', { style: S.customLabel }, finalLabel(final)),
+              h('input', {
+                type: 'text',
+                inputMode: 'latin',
+                maxLength: 1,
+                value: finals[final] || '',
+                style: S.customInput,
+                'aria-label': finalLabel(final),
+                onChange: function (event) { setFinal(final, event.target.value) },
+              }))
+          })),
+        h('div', { style: S.customRow },
+          INITIAL_NOTE_ORDER.map(function (initial) {
+            return h('label', { key: 'i-' + initial, style: S.customCell },
+              h('span', { style: S.customLabel }, initial),
+              h('input', {
+                type: 'text',
+                inputMode: 'latin',
+                maxLength: 1,
+                value: initials[initial] || '',
+                style: S.customInput,
+                'aria-label': initial,
+                onChange: function (event) { setInitial(initial, event.target.value) },
+              }))
+          }),
+          h('label', { style: S.customCell },
+            h('span', { style: S.customLabel }, t('customZero')),
+            h('select', {
+              style: S.schemeSelect,
+              value: zero,
+              onChange: function (event) { setZero(event.target.value) },
+            },
+              h('option', { value: 'natural' }, t('zeroNatural')),
+              h('option', { value: 'o' }, t('zeroO')),
+            ))),
+        complete ? null : h('div', { style: S.bad }, t('customIncomplete')),
+        h('div', { style: S.footer },
+          h('span', { style: S.statsText }, t('customKeys').replace('{n}', Object.keys(used).length)),
+          h('button', {
+            type: 'button',
+            style: S.action,
+            onClick: function () { resetFrom(template) },
+          }, t('customReset')),
+          h('button', { type: 'button', style: S.action, onClick: cancel }, t('customCancel')),
+          h('button', {
+            type: 'button',
+            style: Object.assign({}, S.action, complete ? S.actionPrimary : S.actionDisabled),
+            disabled: !complete,
+            onClick: apply,
+          }, t('customApply'))),
       )
     }
 
@@ -1288,8 +1833,12 @@ window.__ModuleLoader__.load({
       const stats = props.stats
       const prefs = props.prefs
       const t = props.t
-      const mine = React.useMemo(function () { return personalItems(stats) }, [stats, stats.rev])
-      const [item, setItem] = React.useState(function () { return pickItem(stats, prefs.pool, null) })
+      const sch = React.useMemo(function () { return schemeOf(prefs) }, [prefs.scheme, prefs.custom])
+      const mine = React.useMemo(
+        function () { return personalItems(stats, sch) },
+        [stats, stats.rev, sch],
+      )
+      const [item, setItem] = React.useState(function () { return pickItem(stats, sch, prefs.pool, null) })
       const [buffer, setBuffer] = React.useState('')
       const [mark, setMark] = React.useState(null)
       const [revealed, setRevealed] = React.useState(false)
@@ -1332,7 +1881,7 @@ window.__ModuleLoader__.load({
         setBuffer('')
         setMark(null)
         setRevealed(false)
-        setItem(function (prev) { return pickItem(store.state.stats, store.state.prefs.pool, prev) })
+        setItem(function (prev) { return pickItem(store.state.stats, sch, store.state.prefs.pool, prev) })
       }
 
       function finish(typed) {
@@ -1380,7 +1929,7 @@ window.__ModuleLoader__.load({
           window.clearTimeout(timerRef.current)
           timerRef.current = null
         }
-        setItem(function () { return pickItem(store.state.stats, store.state.prefs.pool, item) })
+        setItem(function () { return pickItem(store.state.stats, sch, store.state.prefs.pool, item) })
         setBuffer('')
         setMark(null)
         setRevealed(false)
@@ -1390,7 +1939,7 @@ window.__ModuleLoader__.load({
       function choosePool(pool) {
         prefs.pool = pool
         store.touch()
-        setItem(function () { return pickItem(store.state.stats, pool, null) })
+        setItem(function () { return pickItem(store.state.stats, sch, pool, null) })
         setBuffer('')
         setMark(null)
         setRevealed(false)
@@ -1481,7 +2030,11 @@ window.__ModuleLoader__.load({
       const store = props.store
       const prefs = props.prefs
       const t = props.t
-      const keyStats = React.useMemo(function () { return keyStatsOf(stats) }, [stats, stats.rev])
+      const sch = React.useMemo(function () { return schemeOf(prefs) }, [prefs.scheme, prefs.custom])
+      const keyStats = React.useMemo(
+        function () { return keyStatsOf(stats, sch) },
+        [stats, stats.rev, sch],
+      )
       const ranked = Object.keys(keyStats).map(function (key) {
         return { key: key, weakness: weaknessOf(keyStats[key]), n: keyStats[key].n, bad: keyStats[key].bad }
       }).filter(function (row) { return row.n > 0 }).sort(function (a, b) {
@@ -1489,8 +2042,8 @@ window.__ModuleLoader__.load({
       }).slice(0, 5)
 
       const chars = React.useMemo(function () {
-        return personalItems(stats).slice(0, 12)
-      }, [stats, stats.rev])
+        return personalItems(stats, sch).slice(0, 12)
+      }, [stats, stats.rev, sch])
       const wrong = React.useMemo(function () {
         return Object.keys(stats.wrong || {}).map(function (key) {
           const parts = key.split('|')
@@ -1629,7 +2182,45 @@ window.__ModuleLoader__.load({
           'aria-hidden': true,
         }, '⠿'))
       }
-      children.push(h('span', { style: S.title }, t('title')))
+      // 标题即方案名：下拉框显示当前方案（如「小鹤双拼」），点开直接换方案；
+      // 键位页因此不再需要单独的方案栏。插件名放在 title 提示里。
+      children.push(h('select', {
+        type: 'select',
+        value: prefs.scheme || 'flypy',
+        style: Object.assign({}, S.title, S.schemeTitle),
+        title: t('title') + ' · ' + t('schemeLabel'),
+        'aria-label': t('schemeLabel'),
+        'data-nodrag': true,
+        onPointerDown: function (event) { event.stopPropagation() },
+        onChange: function (event) {
+          const next = event.target.value
+          prefs.scheme = next
+          // 首次选「自定义…」时还没有键位表：直接打开编辑器，以当前方案为模板，
+          // 否则下拉显示「自定义」而实际仍按上一个方案运行，容易误解
+          if (next === 'custom' && !isCustomComplete(normalizeCustom(prefs.custom))) {
+            opts.store.state.ui.customOpen = true
+          }
+          opts.store.touch()
+        },
+      },
+        SCHEME_IDS.map(function (id) {
+          return h('option', { key: id, value: id }, SCHEMES[id].name)
+        }),
+        h('option', { key: 'custom', value: 'custom' }, t('schemeCustom')),
+      ))
+      if (prefs.scheme === 'custom') {
+        children.push(h('button', {
+          type: 'button',
+          'data-nodrag': true,
+          style: S.iconButton,
+          onClick: function () {
+            opts.store.state.ui.customOpen = true
+            opts.store.touch()
+          },
+          title: t('customEdit'),
+          'aria-label': t('customEdit'),
+        }, '✎'))
+      }
       children.push(opts.tabButton('map', t('tabMap')))
       children.push(opts.tabButton('drill', t('tabDrill')))
       children.push(opts.tabButton('stats', t('tabStats')))
@@ -1956,7 +2547,7 @@ window.__ModuleLoader__.load({
         },
         title: active ? t('kbHide') : t('kbShow'),
         'aria-pressed': active,
-      }, '鹤')
+      }, '拼')
     }
 
     function clampWidth(value, left) {
