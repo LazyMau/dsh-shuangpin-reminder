@@ -2,3 +2,7 @@
 node_modules/
 .tmp-schemes/
 *.log
+
+# 本地评审用文档（不进版本库）
+DESIGN.md
+src/heat-table.cjs
