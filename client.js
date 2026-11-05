@@ -523,6 +523,9 @@ window.__ModuleLoader__.load({
       restart: '重来',
       reveal: '看一下',
       revealedKeys: '这两个键',
+      keyStateBad: '反复出错',
+      keyStateWarn: '出过错',
+      keyStateWatch: '打得慢（不代表不会）',
       autoHint: '卡住就亮键',
       statsLine: '对 {ok} / {total} · 连对 {streak}',
       poolCommon: '常用字',
@@ -547,7 +550,8 @@ window.__ModuleLoader__.load({
       tryTag: '盲试{n}',
       clear: '清空',
       slow: '慢',
-      keyTimes: '{n} 次 · 卡 {bad} 次',
+      keyTimes: '{n} 次 · 错 {bad} 次',
+      keySlowOnly: '{n} 次 · 慢/改码 {slow} 次，没有明确错',
       dataNote: '只存在本机',
       recordsFor: '记录按方案分开存，这里只算当前方案',
       schemeLabel: '方案',
@@ -585,6 +589,9 @@ window.__ModuleLoader__.load({
       restart: 'Restart',
       reveal: 'Show keys',
       revealedKeys: 'These two keys',
+      keyStateBad: 'Repeated mistakes',
+      keyStateWarn: 'Has had mistakes',
+      keyStateWatch: 'Slower (not necessarily unknown)',
       autoHint: 'Reveal on stall',
       statsLine: 'Right {ok} / {total} · Streak {streak}',
       poolCommon: 'Common',
@@ -609,7 +616,8 @@ window.__ModuleLoader__.load({
       tryTag: 'tries {n}',
       clear: 'Clear',
       slow: 'slow',
-      keyTimes: '{n} times · {bad} stalls',
+      keyTimes: '{n} times · {bad} mistakes',
+      keySlowOnly: '{n} times · {slow} slow/fixed, no clear mistakes',
       dataNote: 'local only',
       recordsFor: 'Records are kept per scheme; only the current one is counted here',
       schemeLabel: 'Scheme',
@@ -859,8 +867,16 @@ window.__ModuleLoader__.load({
         stalls: [], wrong: {}, bigram: {}, lastChar: '', base: 420,
       }
       if (!raw || typeof raw !== 'object') return out
-      if (raw.chars && typeof raw.chars === 'object') out.chars = raw.chars
-      if (raw.keys && typeof raw.keys === 'object') out.keys = raw.keys
+      if (raw.chars && typeof raw.chars === 'object') {
+        Object.keys(raw.chars).forEach(function (ch) {
+          out.chars[ch] = normalizeCharEntry(raw.chars[ch])
+        })
+      }
+      if (raw.keys && typeof raw.keys === 'object') {
+        Object.keys(raw.keys).forEach(function (k) {
+          out.keys[k] = normalizeKeyEntry(raw.keys[k])
+        })
+      }
       if (Array.isArray(raw.events)) out.events = raw.events.slice(0, 30)
       if (Array.isArray(raw.echo)) out.echo = raw.echo.slice(0, 30)
       if (Array.isArray(raw.stalls)) out.stalls = raw.stalls.slice(0, 20)
@@ -869,6 +885,49 @@ window.__ModuleLoader__.load({
       if (typeof raw.lastChar === 'string') out.lastChar = raw.lastChar
       if (typeof raw.base === 'number' && raw.base > 0) out.base = raw.base
       return out
+    }
+
+    /**
+     * 字符条目的字段语义（三种证据分开记，不要混成一个 bad）：
+     *   n    出现次数
+     *   bad  明确答错次数（练习答错）—— 只有它直接推动「弱键」
+     *   slow 比基线慢的次数 —— 单独的「待观察」信号
+     *   fix  退格改码次数 —— 弱于 bad 的改错证据
+     *   hint 看过提示后才答对的次数
+     *
+     * 旧数据只有一个 bad，它混了「慢」在里面。迁移时把旧 bad 记为 slow，
+     * 而不是当成明确错误——否则老用户升级后所有键都会被判成不会打。
+     */
+    function normalizeCharEntry(entry) {
+      if (!entry || typeof entry !== 'object') return { n: 0, ms: 0, bad: 0, slow: 0, fix: 0, hint: 0, at: 0 }
+      const hasEvidence = typeof entry.slow === 'number' || typeof entry.fix === 'number'
+        || typeof entry.explicit === 'boolean'
+      const legacyBad = Number(entry.bad) || 0
+      return {
+        n: Number(entry.n) || 0,
+        ms: Number(entry.ms) || 0,
+        // 有 slow/fix 字段 = 新格式，bad 就是真正的答错
+        // 没有 = 旧格式，旧 bad 混了慢，按慢处理
+        bad: hasEvidence ? (Number(entry.bad) || 0) : 0,
+        slow: hasEvidence ? (Number(entry.slow) || 0) : legacyBad,
+        fix: Number(entry.fix) || 0,
+        hint: Number(entry.hint) || 0,
+        at: Number(entry.at) || 0,
+      }
+    }
+
+    /** 键级条目：同样把「明确错误」与「慢/改码」分开 */
+    function normalizeKeyEntry(entry) {
+      if (!entry || typeof entry !== 'object') return { n: 0, bad: 0, slow: 0, fix: 0, hint: 0 }
+      const hasEvidence = typeof entry.slow === 'number' || typeof entry.fix === 'number'
+      const legacyBad = Number(entry.bad) || 0
+      return {
+        n: Number(entry.n) || 0,
+        bad: hasEvidence ? (Number(entry.bad) || 0) : 0,
+        slow: hasEvidence ? (Number(entry.slow) || 0) : legacyBad,
+        fix: Number(entry.fix) || 0,
+        hint: Number(entry.hint) || 0,
+      }
     }
 
     /** 从旧包名的存储键迁移一次；新键已有数据时不动 */
@@ -1122,6 +1181,12 @@ window.__ModuleLoader__.load({
       const unit = Math.max(40, Math.min(8000, ms / Math.max(1, chars.length)))
       st.base = Math.max(140, Math.min(1600, st.base * 0.85 + unit * 0.15))
       const slow = unit > st.base * 1.5 + 120 || backs >= 2
+      // 慢 与 错 是两种证据，分开记：
+      //   slow  = 这次比自己的基线慢（可能只是走神/在想内容，不代表不会打）
+      //   backs = 按了退格，说明改过码（弱一些的证据，可能是手滑）
+      //   bad   = 明确答错（来自练习），只有它才直接推动「弱键」
+      // 旧数据只有 bad，迁移时按慢处理，避免把历史误当明确错误。
+      const slowOnly = slow
       const sch = schemeOf(store.state.prefs)
       const codes = []
       for (let i = 0; i < chars.length; i += 1) {
@@ -1129,11 +1194,12 @@ window.__ModuleLoader__.load({
         const code = codeOfChar(ch, sch)
         codes.push(code.length === 2 ? code : null)
         if (code.length !== 2) continue
-        const entry = st.chars[ch] || (st.chars[ch] = { n: 0, ms: 0, bad: 0, at: 0 })
+        const entry = st.chars[ch] || (st.chars[ch] = normalizeCharEntry(null))
         entry.n += 1
         entry.ms += unit
         entry.at = Date.now()
-        if (slow) entry.bad += 1
+        if (slowOnly) entry.slow = (entry.slow || 0) + 1
+        if (backs >= 2) entry.fix = (entry.fix || 0) + 1
       }
       st.events.unshift({
         t: Date.now(), word: chars.slice(0, 12).join(''), codes: codes,
@@ -1189,43 +1255,87 @@ window.__ModuleLoader__.load({
       return built ? built.name : id
     }
 
-    /** 每个键的 { n, bad }：真实输入按字累积 + 练习按次累积 */
+    /**
+     * 每个键的多种证据分开累积：
+     *   n    出现次数
+     *   bad  明确答错（只有练习能给出）—— 推动「弱键」
+     *   slow 比基线慢 —— 单独的「待观察」
+     *   fix  退格改码
+     * 真实输入只会产生 slow / fix；bad 只能来自练习答错。
+     * 这样「慢」不会被误读成「不会」。
+     */
     function keyStatsOf(stats, sch) {
       const map = {}
-      function bump(key, n, bad) {
-        const entry = map[key] || (map[key] = { n: 0, bad: 0 })
-        entry.n += n
-        entry.bad += bad
+      function bump(key, entry) {
+        if (!key || !entry) return
+        const acc = map[key] || (map[key] = { n: 0, bad: 0, slow: 0, fix: 0 })
+        acc.n += entry.n || 0
+        acc.bad += entry.bad || 0
+        acc.slow += entry.slow || 0
+        acc.fix += entry.fix || 0
       }
       const chars = stats.chars || {}
       for (const ch in chars) {
         const entry = chars[ch]
         const code = codeOfChar(ch, sch)
         if (code.length !== 2) continue
-        bump(code.charAt(0), entry.n, entry.bad)
-        bump(code.charAt(1), entry.n, entry.bad)
+        bump(code.charAt(0), entry)
+        bump(code.charAt(1), entry)
       }
       const keys = stats.keys || {}
-      for (const key in keys) bump(key, keys[key].n, keys[key].bad)
+      for (const key in keys) bump(key, normalizeKeyEntry(keys[key]))
       return map
     }
 
+    /** 明确错误率：只算 bad，样本不足返回 null */
     function weaknessOf(entry) {
       if (!entry || !entry.n || entry.n < MIN_SAMPLE) return null
-      return Math.max(0, Math.min(1, entry.bad / entry.n))
+      return Math.max(0, Math.min(1, (entry.bad || 0) / entry.n))
+    }
+
+    /** 「待观察」比例：慢 + 改码，单独呈现，不与弱键混算 */
+    function frictionOf(entry) {
+      if (!entry || !entry.n || entry.n < MIN_SAMPLE) return null
+      return Math.max(0, Math.min(1, ((entry.slow || 0) + (entry.fix || 0)) / entry.n))
     }
 
     const HEAT_COLORS = {
       warn: 'var(--dsw-alias-state-warn-primary, #c98a1b)',
       bad: 'var(--dsw-alias-state-error-primary, #d64545)',
+      watch: 'var(--dsw-alias-label-tertiary, #9aa1ab)',
     }
-    /** null = 稳（不做任何标记），warn = 不稳（黄条），bad = 常卡（红条+红边） */
-    function heatLevel(weakness) {
-      if (weakness === null || weakness < 0.25) return null
-      return weakness < 0.45 ? 'warn' : 'bad'
+    /**
+     * 三档，证据强度递增：
+     *   null  = 没有足够证据，不标
+     *   watch = 只是慢/改码多 → 灰色细条（「待观察」，不代表不会）
+     *   warn  = 有明确错，但还不算反复错 → 黄条
+     *   bad   = 反复明确错 → 红条 + 红边
+     *
+     * 判 red 必须同时满足：样本够（MIN_CONFIDENT）+ 错够多（MIN_BAD） + 比例够高。
+     * 旧实现是 n=2,bad=1 就判红，两次里错一次就标红，太容易被单次波动带偏。
+     */
+    const MIN_CONFIDENT = 6   // 进入 warn/bad 需要的最小有效样本
+    const MIN_BAD = 3         // 判 bad 至少要有这么多次明确错
+    const BAD_RATE = 0.4      // 判 bad 的错误率下限
+
+    function heatLevelOf(weakness, friction, entry) {
+      const n = entry && entry.n ? entry.n : 0
+      const bad = entry && entry.bad ? entry.bad : 0
+      // 明确错误优先：有足够错样本才可能进 warn/bad
+      if (weakness !== null && n >= MIN_CONFIDENT) {
+        if (bad >= MIN_BAD && weakness >= BAD_RATE) return 'bad'
+        if (bad >= 1 && weakness >= 0.2) return 'warn'
+      }
+      // 没有明确错误时，慢/改码只给「待观察」，绝不标红
+      if (friction !== null && friction >= 0.3) return 'watch'
+      return null
     }
-    function heatColor(weakness) {
-      const level = heatLevel(weakness)
+
+    function heatLevel(entry) {
+      return heatLevelOf(weaknessOf(entry), frictionOf(entry), entry)
+    }
+    /** 档位 → 颜色（记录页的条形图用） */
+    function heatColorOfLevel(level) {
       return level ? HEAT_COLORS[level] : null
     }
 
@@ -1236,21 +1346,32 @@ window.__ModuleLoader__.load({
       return n
     }
 
+    /**
+     * 「我的错字」题库：以明确错误为主，慢/改码辅助。
+     * 只用 bad 会把「打得慢」的字也塞进错字库，练起来会莫名其妙。
+     */
     function personalItems(stats, sch) {
       const items = []
       const chars = stats.chars || {}
       for (const ch in chars) {
         const entry = chars[ch]
-        if (!entry || entry.n < MIN_SAMPLE || !entry.bad) continue
+        if (!entry || entry.n < MIN_SAMPLE) continue
+        const bad = entry.bad || 0
+        const slow = (entry.slow || 0) + (entry.fix || 0)
+        if (!bad && !slow) continue
         const pinyin = pinyinOf(ch)
         if (!pinyin) continue
         const parsed = parsePinyin(pinyin)
         if (!parsed) continue
         const code = codeOf(parsed.i, parsed.f, sch)
         if (code.length !== 2) continue
-        items.push({ h: ch, p: pinyin, i: parsed.i, f: parsed.f, code: code, bad: entry.bad, n: entry.n })
+        items.push({
+          h: ch, p: pinyin, i: parsed.i, f: parsed.f, code: code,
+          bad: bad, slow: slow, n: entry.n,
+        })
       }
-      items.sort(function (a, b) { return (b.bad - a.bad) || (b.n - a.n) })
+      // 有明确错的永远排在只有慢的前面
+      items.sort(function (a, b) { return (b.bad - a.bad) || (b.slow - a.slow) || (b.n - a.n) })
       return items.slice(0, 40)
     }
 
@@ -1271,9 +1392,20 @@ window.__ModuleLoader__.load({
       for (let i = 0; i < list.length; i += 1) {
         const item = list[i]
         if (exclude && item.code === exclude.code && list.length > 1) continue
-        const w1 = weaknessOf(map[item.code.charAt(0)])
-        const w2 = weaknessOf(map[item.code.charAt(1)])
-        const base = ((w1 === null ? 0.4 : w1) + (w2 === null ? 0.4 : w2)) / 2
+        // 选题优先级：明确错误 > 待观察（慢/改码） > 无数据 > 已练熟
+        // 「慢」只作弱加权，避免把只是慢的键当不会的键反复练
+        const e1 = map[item.code.charAt(0)]
+        const e2 = map[item.code.charAt(1)]
+        const w1 = weaknessOf(e1)
+        const w2 = weaknessOf(e2)
+        const f1 = frictionOf(e1)
+        const f2 = frictionOf(e2)
+        const rate = function (w, f) {
+          if (w !== null) return 1 - w
+          if (f !== null) return 0.55 - f * 0.15
+          return 0.4
+        }
+        const base = (rate(w1, f1) + rate(w2, f2)) / 2
         const score = base + Math.random() * 0.45
         if (score > bestScore) {
           bestScore = score
@@ -1498,20 +1630,19 @@ window.__ModuleLoader__.load({
         fontFamily: 'inherit',
         transition: 'box-shadow 120ms ease, transform 120ms ease',
       },
-      keyHot: {
-        borderColor: 'var(--dsw-alias-brand-primary, #2b6cf6)',
-        boxShadow: 'inset 0 0 0 1.5px var(--dsw-alias-brand-primary, #2b6cf6), 0 0 0 2px var(--dsw-alias-brand-primary, #2b6cf6)',
+      // —— 长期状态：只改边框，不动外环 ——
+      keyBad: { borderColor: 'var(--dsw-alias-state-error-primary, #d64545)' },
+      keyWarn: { borderColor: 'var(--dsw-alias-state-warn-primary, #c98a1b)' },
+      keyWatch: { borderStyle: 'dashed', borderColor: 'var(--dsw-alias-label-tertiary, #9aa1ab)' },
+      // —— 短时提示：只加外环，不改边框色，这样弱键的红边不会被预测盖掉 ——
+      ringHot: {
+        boxShadow: '0 0 0 2px var(--dsw-alias-brand-primary, #2b6cf6)',
         transform: 'translateY(-1px)',
       },
-      keyHover: { borderColor: 'var(--dsw-alias-brand-primary, #2b6cf6)' },
-      keyBad: { borderColor: 'var(--dsw-alias-state-error-primary, #d64545)' },
-      keyPredict: {
-        borderColor: 'var(--dsw-alias-label-primary, #1a1d21)',
-        boxShadow: 'inset 0 0 0 1px var(--dsw-alias-label-primary, #1a1d21)',
-      },
-      keyPredictStrong: {
-        borderColor: 'var(--dsw-alias-label-primary, #1a1d21)',
-        boxShadow: '0 0 0 2px var(--dsw-alias-label-primary, #1a1d21), inset 0 0 0 1px var(--dsw-alias-label-primary, #1a1d21)',
+      ringHover: { boxShadow: '0 0 0 1px var(--dsw-alias-brand-primary, #2b6cf6)' },
+      ringPredict: { boxShadow: '0 0 0 1.5px var(--dsw-alias-label-primary, #1a1d21)' },
+      ringPredictStrong: {
+        boxShadow: '0 0 0 2.5px var(--dsw-alias-label-primary, #1a1d21)',
         transform: 'translateY(-1px)',
       },
       keyPredictChar: {
@@ -1723,13 +1854,19 @@ window.__ModuleLoader__.load({
       const size = props.size
       const sch = props.sch
       const finalText = item.f.map(finalLabel).join(' / ')
+      // 边框（长期状态）与 外环（短时提示）分层叠加，互不覆盖：
+      //   边框 = 键自身的健康度（红=反复错 / 黄=有错 / 灰=待观察）
+      //   外环 = 这一刻的提示（蓝=刚按过 / 深色=预测）
+      // 旧实现让预测覆盖了红边，导致「既弱又被预测」的键丢掉弱键信息。
       const style = Object.assign(
         {},
         S.key,
         { width: size.w, height: size.h },
-        props.hot ? S.keyHot : (props.hovered ? S.keyHover : null),
-        props.level === 'bad' ? S.keyBad : null,
-        props.predict ? (props.predict.strong ? S.keyPredictStrong : S.keyPredict) : null,
+        props.level === 'bad' ? S.keyBad
+          : props.level === 'warn' ? S.keyWarn
+            : props.level === 'watch' ? S.keyWatch : null,
+        props.hot ? S.ringHot : (props.hovered && !props.predict ? S.ringHover : null),
+        props.predict ? (props.predict.strong ? S.ringPredictStrong : S.ringPredict) : null,
       )
       const finalStyle = Object.assign(
         {},
@@ -1745,8 +1882,15 @@ window.__ModuleLoader__.load({
           onMouseEnter: props.onEnter,
           onMouseLeave: props.onLeave,
           onClick: props.onClick,
-          title: item.k + ' · ' + finalText + (item.ex[0] ? ' — ' + sampleText(item.ex[0], sch) : ''),
-          'aria-label': item.k + ' ' + item.f.map(finalLabel).join(' '),
+          title: item.k + ' · ' + finalText
+            + (props.level === 'bad' ? ' — ' + props.t('keyStateBad')
+              : props.level === 'warn' ? ' — ' + props.t('keyStateWarn')
+                : props.level === 'watch' ? ' — ' + props.t('keyStateWatch') : '')
+            + (item.ex[0] ? ' — ' + sampleText(item.ex[0], sch) : ''),
+          'aria-label': item.k + ' ' + item.f.map(finalLabel).join(' ')
+            + (props.level === 'bad' ? ' ' + props.t('keyStateBad')
+              : props.level === 'warn' ? ' ' + props.t('keyStateWarn')
+                : props.level === 'watch' ? ' ' + props.t('keyStateWatch') : ''),
         },
         h('span', { style: Object.assign({}, S.keyLetter, { fontSize: Math.max(8, Math.min(18, size.w * 0.2)) }) }, item.k),
         item.s ? h('span', { style: Object.assign({}, S.keyInitial, { fontSize: Math.max(8, Math.min(18, size.w * 0.19)) }) }, item.s) : null,
@@ -1767,7 +1911,9 @@ window.__ModuleLoader__.load({
                 S.heatBar,
                 props.level === 'bad'
                   ? { height: 4, background: HEAT_COLORS.bad }
-                  : { background: HEAT_COLORS.warn },
+                  : props.level === 'warn'
+                    ? { background: HEAT_COLORS.warn }
+                    : { height: 2, background: HEAT_COLORS.watch },
               ),
             })
           : null,
@@ -1852,7 +1998,7 @@ window.__ModuleLoader__.load({
           { key: 'row-' + rowIndex, style: { display: 'flex', gap: gap, marginTop: rowIndex ? gap : 0, marginLeft: rowIndex * offset, flexShrink: 0 } },
           row.map(function (item) {
             const key = item.k.toLowerCase()
-            const weakness = weaknessOf(keyStats[key])
+            const keyEntry = keyStats[key] || null
             return h(Keycap, {
               key: item.k,
               item: item,
@@ -1860,8 +2006,10 @@ window.__ModuleLoader__.load({
               size: size,
               hot: hotKeys[key] === true,
               hovered: hover !== null && hover.k === item.k,
-              level: heatLevel(weakness),
+              level: heatLevel(keyEntry),
+              friction: frictionOf(keyEntry),
               predict: predictMap[key] || null,
+              t: t,
               onEnter: function () { setHover(item) },
               onLeave: function () { setHover(function (prev) { return prev && prev.k === item.k ? null : prev }) },
               onClick: function () { setHover(function (prev) { return prev && prev.k === item.k ? null : item }) },
@@ -2097,15 +2245,32 @@ window.__ModuleLoader__.load({
       function finish(typed) {
         const good = typed === item.code
         const st = store.state.stats
+        // 答错时定位到具体哪个键错了：
+        //   两位都不同 / 只有一位不同 → 只给那一位加 bad
+        //   若无法判断（位数对不上等）→ 记为「本题有误」，不平摊到两个键
+        // 旧实现是两位都 +bad，打错一个韵母会把声母键也算成不会，弱键率被拉偏。
+        const wrongAt = []
+        if (!good) {
+          if (typed.length === item.code.length) {
+            for (let i = 0; i < item.code.length; i += 1) {
+              if (typed.charAt(i) !== item.code.charAt(i)) wrongAt.push(i)
+            }
+          }
+        }
         for (let i = 0; i < item.code.length; i += 1) {
           const key = item.code.charAt(i)
-          const entry = st.keys[key] || (st.keys[key] = { n: 0, bad: 0, hint: 0 })
+          const entry = st.keys[key] || (st.keys[key] = normalizeKeyEntry(null))
           entry.n += 1
-          if (!good) entry.bad += 1
+          // 只有能确定是这一位错时才记 bad；定位不到就不记到任何键上
+          if (wrongAt.indexOf(i) >= 0) entry.bad += 1
+        }
+        // 无法归因的错题单独计数，不进键的弱键率
+        if (!good && !wrongAt.length) {
+          st.unattributed = (st.unattributed || 0) + 1
         }
         st.rev = (st.rev || 0) + 1
         store.touch()
-        setMark({ good: good, typed: typed })
+        setMark({ good: good, typed: typed, wrongAt: wrongAt })
         setTally(function (prev) {
           return { ok: prev.ok + (good ? 1 : 0), total: prev.total + 1, streak: good ? prev.streak + 1 : 0 }
         })
@@ -2245,10 +2410,26 @@ window.__ModuleLoader__.load({
         function () { return keyStatsOf(stats, sch) },
         [stats, stats.rev, sch],
       )
+      // 排序用「明确错误率」，慢只作次级参考。
+      // 排行榜要回答「哪个键真的不会」，不是「哪个键打得慢」。
       const ranked = Object.keys(keyStats).map(function (key) {
-        return { key: key, weakness: weaknessOf(keyStats[key]), n: keyStats[key].n, bad: keyStats[key].bad }
+        const e = keyStats[key]
+        return {
+          key: key,
+          weakness: weaknessOf(e),
+          friction: frictionOf(e),
+          n: e.n,
+          bad: e.bad || 0,
+          slow: e.slow || 0,
+          fix: e.fix || 0,
+        }
       }).filter(function (row) { return row.n > 0 }).sort(function (a, b) {
-        return (b.weakness === null ? 0 : b.weakness) - (a.weakness === null ? 0 : a.weakness) || b.n - a.n
+        const wa = a.weakness === null ? -1 : a.weakness
+        const wb = b.weakness === null ? -1 : b.weakness
+        if (wb !== wa) return wb - wa
+        const fa = a.friction === null ? -1 : a.friction
+        const fb = b.friction === null ? -1 : b.friction
+        return fb - fa || b.n - a.n
       }).slice(0, 5)
 
       const chars = React.useMemo(function () {
@@ -2347,12 +2528,20 @@ window.__ModuleLoader__.load({
             h('div', { style: S.sectionTitle }, t('weakTitle')),
             ranked.length
               ? ranked.map(function (row) {
-                  const color = heatColor(row.weakness) || 'var(--dsw-alias-state-idle-primary, #9aa3ad)'
-                  const value = Math.round((row.weakness === null ? 0 : row.weakness) * 100)
+                  // 有明确错误 → 按错误率画；只有慢 → 灰色，并说明「只是慢」
+                  const hasErr = row.weakness !== null
+                  const ratio = hasErr ? row.weakness : (row.friction === null ? 0 : row.friction)
+                  const color = hasErr
+                    ? (heatColorOfLevel(heatLevelOf(row.weakness, row.friction, row)) || 'var(--dsw-alias-state-idle-primary, #9aa3ad)')
+                    : 'var(--dsw-alias-label-tertiary, #9aa1ab)'
+                  const value = Math.round(ratio * 100)
+                  const meta = hasErr
+                    ? t('keyTimes').replace('{n}', row.n).replace('{bad}', row.bad)
+                    : t('keySlowOnly').replace('{n}', row.n).replace('{slow}', row.slow + row.fix)
                   return h('div', { key: row.key, style: S.weakRow },
                     h('span', { style: S.weakKey }, row.key.toUpperCase()),
                     h('span', { style: S.barTrack }, h('span', { style: Object.assign({}, S.barFill, { width: Math.max(4, value) + '%', background: color }) })),
-                    h('span', { style: S.weakMeta }, t('keyTimes').replace('{n}', row.n).replace('{bad}', row.bad)))
+                    h('span', { style: S.weakMeta }, meta))
                 })
               : h('div', { style: S.empty }, t('weakNone'))),
           h('div', { style: { flex: '1 1 180px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 } },

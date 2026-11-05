@@ -35,7 +35,7 @@
   },
   "scripts": {
     "build": "node src/build-client.cjs src client.js",
-    "test": "node src/schemes.test.cjs && node src/smoke.cjs . map && node src/smoke.cjs . drill && node src/smoke.cjs . stats && node src/smoke.cjs . float && node src/smoke.cjs . fab && node src/smoke.cjs . capture && node src/smoke-scheme.cjs . && node src/smoke-picker.cjs . && node src/smoke-height.cjs . && node src/smoke-mirror.cjs . && node src/smoke-migrate.cjs . && node src/smoke-per-scheme.cjs . && node src/smoke-proto.cjs . && node src/mirror-size.cjs && node src/layout-check.cjs && node src/smoke-repair.cjs . && node src/smoke-records-switch.cjs . && node src/smoke-switch-live.cjs .",
+    "test": "node src/schemes.test.cjs && node src/smoke.cjs . map && node src/smoke.cjs . drill && node src/smoke.cjs . stats && node src/smoke.cjs . float && node src/smoke.cjs . fab && node src/smoke.cjs . capture && node src/smoke-scheme.cjs . && node src/smoke-picker.cjs . && node src/smoke-height.cjs . && node src/smoke-mirror.cjs . && node src/smoke-migrate.cjs . && node src/smoke-per-scheme.cjs . && node src/smoke-proto.cjs . && node src/mirror-size.cjs && node src/layout-check.cjs && node src/smoke-repair.cjs . && node src/smoke-records-switch.cjs . && node src/smoke-switch-live.cjs . && node src/smoke-evidence.cjs . && node src/smoke-drill-attr.cjs .",
     "lint": "node src/lint-locale.cjs",
     "check:schemes": "node src/derive-check.cjs .tmp-schemes --check"
   },
