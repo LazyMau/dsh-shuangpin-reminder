@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>输入法回显探测</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: ui-sans-serif, system-ui, "Microsoft YaHei", sans-serif;
+    max-width: 760px; margin: 32px auto; padding: 0 16px; line-height: 1.6;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: #6b7280; margin: 0 0 20px; font-size: 13px; }
+  textarea {
+    width: 100%; height: 120px; padding: 12px; font-size: 15px;
+    border: 1px solid #cfd4da; border-radius: 8px; font-family: inherit;
+    resize: vertical; box-sizing: border-box;
+  }
+  textarea:focus { outline: 2px solid #2b6cf6; outline-offset: -1px; border-color: transparent; }
+  .verdict {
+    margin: 16px 0; padding: 12px 14px; border-radius: 8px;
+    background: #f2f4f7; border: 1px solid #e3e6ea; font-size: 14px;
+  }
+  .verdict.ok { background: #e8f5ec; border-color: #b7dfc4; }
+  .verdict.warn { background: #fdf3e2; border-color: #f0d8ac; }
+  .verdict b { font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e6ea; }
+  th { color: #6b7280; font-weight: 500; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #f2f4f7; padding: 1px 5px; border-radius: 4px; font-size: 12.5px;
+  }
+  .empty { color: #9aa1ab; font-size: 13px; }
+  .hint { font-size: 12.5px; color: #6b7280; margin-top: 20px; }
+  .hint li { margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<h1>输入法回显探测</h1>
+<p class="sub">
+  用来确认你的输入法在打字时，到底把什么内容报给网页。
+  这决定了插件能不能推断出「你把哪个键按错了」。
+</p>
+
+<textarea id="pad" placeholder="在这里用双拼打几个字，比如「哪些」「你好」"></textarea>
+
+<div class="verdict" id="verdict">
+  还没有采集到内容。请在上面用双拼打几个字。
+</div>
+
+<table>
+  <thead>
+    <tr><th style="width:64px">时间</th><th style="width:110px">事件</th><th>内容</th></tr>
+  </thead>
+  <tbody id="rows">
+    <tr><td colspan="3" class="empty">（等待输入…）</td></tr>
+  </tbody>
+</table>
+
+<div class="hint">
+  <b>怎么读这个结果：</b>
+  <ul>
+    <li>如果「合成更新」里出现的是 <code>na</code> <code>na x</code> 这类<b>双拼码</b> → 插件拿不到拼音。</li>
+    <li>如果出现的是 <code>na</code> <code>na xi</code> <code>na xie</code> 这类<b>拼音</b> → 插件能推断错键。</li>
+    <li>如果只出现候选字、没有字母 → 这条链路完全拿不到过程。</li>
+  </ul>
+</div>
+
+<script>
+(function () {
+  var pad = document.getElementById('pad');
+  var rows = document.getElementById('rows');
+  var verdict = document.getElementById('verdict');
+  var startAt = 0;
+  var all = [];
+  var printed = false;
+
+  function now() { return Math.round(performance.now() - startAt); }
+
+  function add(kind, data) {
+    all.push({ at: now(), kind: kind, data: String(data) });
+    render();
+  }
+
+  function render() {
+    rows.innerHTML = '';
+    all.slice(-14).forEach(function (row) {
+      var tr = document.createElement('tr');
+      var td1 = document.createElement('td');
+      td1.textContent = '+' + row.at + 'ms';
+      td1.style.color = '#6b7280';
+      td1.style.fontSize = '12px';
+      var td2 = document.createElement('td');
+      td2.textContent = row.kind;
+      var td3 = document.createElement('td');
+      var code = document.createElement('code');
+      code.textContent = row.data;
+      td3.appendChild(code);
+      tr.appendChild(td1);
+      tr.appendChild(td2);
+      tr.appendChild(td3);
+      rows.appendChild(tr);
+    });
+    judge();
+  }
+
+  function judge() {
+    // 只看「合成更新」里出现过的内容
+    var updates = all.filter(function (r) { return r.kind === '合成更新'; }).map(function (r) { return r.data; });
+    if (!updates.length) return;
+    var hasSpaceish = updates.some(function (d) { return /[\s']/.test(d); });
+    var longest = updates.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
+    // 粗略判断：拼音里会出现 ae iu 之类连写的多字母，双拼码一般最多两位一个音节
+    var looksPinyin = /ie|a[io]|u[ae]|ao|ou|ang|eng|ing/.test(longest);
+
+    verdict.className = 'verdict ' + (looksPinyin ? 'ok' : 'warn');
+    if (looksPinyin) {
+      verdict.innerHTML = '<b>看起来是拼音。</b>最长一次是 <code>' + escapeHtml(longest) +
+        '</code>。插件应该能推断出你按错了哪个键。';
+    } else if (hasSpaceish) {
+      verdict.innerHTML = '<b>带分隔符的双拼码。</b>最长一次是 <code>' + escapeHtml(longest) +
+        '</code>。可能需要按分隔符拆分音节。';
+    } else {
+      verdict.innerHTML = '<b>看起来是双拼码。</b>最长一次是 <code>' + escapeHtml(longest) +
+        '</code>。插件拿不到拼音，只能记录退格次数，无法推断具体错键。';
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  pad.addEventListener('compositionstart', function (e) {
+    startAt = performance.now();
+    add('开始合成', '');
+  });
+  pad.addEventListener('compositionupdate', function (e) {
+    add('合成更新', e.data || '');
+  });
+  pad.addEventListener('compositionend', function (e) {
+    add('上屏', e.data || '（空）');
+  });
+  pad.addEventListener('keydown', function (e) {
+    if (e.key === 'Backspace') add('退格', '');
+  });
+})();
+</script>
+</body>
+</html>

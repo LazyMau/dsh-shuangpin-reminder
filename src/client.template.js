@@ -886,6 +886,23 @@ window.__ModuleLoader__.load({
           const key = pair.correct + '|' + pair.pressed
           st.wrong[key] = (st.wrong[key] || 0) + 1
         })
+        // 退格能推断出「该按哪个键、实际按了哪个键」时，这就是一次明确打错：
+        // 把错误记到**正确的那个键**上（我们要回答的是「这个键的规则你掌握了吗」，
+        // 不是「这个物理键被误触了几次」）。推断不出来的退格只留 fix，不升级为错。
+        if ((info.confusions || []).length) {
+          ;(info.confusions || []).forEach(function (pair) {
+            const correctKey = String(pair.correct || '').toLowerCase()
+            if (!correctKey) return
+            const entry = st.keys[correctKey] || (st.keys[correctKey] = normalizeKeyEntry(null))
+            entry.bad = (entry.bad || 0) + 1
+          })
+          // 字符级也记一次：这样这个字会进「我的错字」题库
+          const lastCh = chars[chars.length - 1]
+          if (lastCh) {
+            const ce = st.chars[lastCh] || (st.chars[lastCh] = normalizeCharEntry(null))
+            ce.bad = (ce.bad || 0) + 1
+          }
+        }
       }
 
       // 字级二元：上一个字 → 下一个字（用于「下一个可能打什么」）
