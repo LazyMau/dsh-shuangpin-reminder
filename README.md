@@ -67,6 +67,10 @@ node src/derive-check.cjs <rime schema 目录> --check   # 与 src/schemes.cjs �
 - **记录按方案分开存**：同一套键位在不同双拼方案下含义不同（比如 `k` 在小鹤是 `ei`、在自然码是 `iao`），
   混在一起的热力图没有意义。所以在标题栏切换方案后，进度、弱键、错键、卡过的字、最近输入都只算当前方案；
   换回来时原来的记录还在。记录页标题旁的小标签标出这份数据属于哪个方案。
+- **旧记录归谁**：1.5.0 之前的统计没有记录方案（那时插件只支持小鹤），
+  升级后统一归到小鹤。不归给「升级那一刻停留的方案」——否则你切到别的方案再重启，
+  小鹤攒下的记录就会跑到那个方案下，看起来像「换方案后记录还在」。
+  早期中间版本确实犯过这个错，现在会自动把错放的数据挪回小鹤（只搬一次）。
 - 「练习」页可以切到 **我的错字**，只练你卡过的字。
 
 ## 隐私
@@ -152,6 +156,9 @@ src/smoke-height.cjs    新会话高度回归（面板/键盘不被压扁）
 src/smoke-mirror.cjs    cookie 镜像行为（不含原文 / 可恢复 / 旧数据清除）
 src/smoke-migrate.cjs   旧存储键迁移（不丢偏好与统计）
 src/smoke-per-scheme.cjs 记录按方案隔离（切方案不串数据）
+src/smoke-records-switch.cjs 记录页文本随方案变化
+src/smoke-switch-live.cjs 同一 store 上实时切换方案
+src/smoke-repair.cjs    旧统计错放到其他方案时的修复
 src/mirror-size.cjs     镜像体积与隐私体检（估算 cookie 条数与上限）
 src/smoke-proto.cjs     恶意统计数据不污染原型
 src/add-fallbacks.cjs   给主题变量补兜底色（幂等，人工执行）
@@ -176,6 +183,9 @@ node src/smoke-height.cjs .       # 面板/键盘不可被压扁
 node src/smoke-mirror.cjs .       # cookie 镜像不含输入原文、可跨端口恢复
 node src/smoke-migrate.cjs .      # 旧存储键迁移不丢数据
 node src/smoke-per-scheme.cjs .   # 记录按方案隔离
+node src/smoke-records-switch.cjs . # 记录页文本随方案变化
+node src/smoke-switch-live.cjs .  # 同一 store 上实时切换方案
+node src/smoke-repair.cjs .       # 旧统计错放时能被修回
 node src/mirror-size.cjs          # 镜像体积与隐私体检
 node src/smoke-proto.cjs .        # 恶意统计数据不污染原型
 node src/layout-check.cjs         # 记录页三栏布局估算

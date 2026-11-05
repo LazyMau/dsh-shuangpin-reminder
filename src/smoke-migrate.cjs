@@ -92,10 +92,11 @@ function mount(seed) {
   const statRaw = storage.get(NEW_STAT)
   ok(statRaw, '旧统计未迁移到新键')
   const statStore = JSON.parse(statRaw)
-  const bucket = statStore.buckets ? statStore.buckets[statStore.active] : statStore
+  // 旧统计没有方案信息，统一归到小鹤（当时插件只支持小鹤）
+  const bucket = statStore.buckets ? statStore.buckets.flypy : statStore
   ok(bucket && bucket.keys && bucket.keys.q && bucket.keys.q.n === 7, '旧统计迁移后键计数丢了')
   ok(bucket.base === 420, '旧统计迁移后 base 丢了')
-  console.log('旧键 → 新键迁移 ✓')
+  console.log('旧键 → 新键迁移（旧统计归入小鹤）✓')
 }
 
 /* 2. 新旧都有：新键优先，不被覆盖 */
@@ -109,8 +110,9 @@ function mount(seed) {
   })
   ok(storage.get(NEW_PREF) === newPrefs, '新键数据被旧键覆盖了')
   const newStore = JSON.parse(storage.get(NEW_STAT))
-  const newBucket = newStore.buckets ? newStore.buckets[newStore.active] : newStore
-  ok(newBucket.keys.z.n === 1, '新统计被旧统计覆盖了')
+  // 新键里的统计是旧格式（扁平），会归入小鹤桶；关键是它没被 OLD_STAT 覆盖
+  const newBucket = newStore.buckets ? newStore.buckets.flypy : newStore
+  ok(newBucket && newBucket.keys && newBucket.keys.z && newBucket.keys.z.n === 1, '新统计被旧统计覆盖了')
   console.log('新键优先、不被旧键覆盖 ✓')
 }
 

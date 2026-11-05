@@ -160,7 +160,7 @@ function typeChar(m, ch, pinyin) {
   console.log('两套方案数据独立共存（flypy 9 / zrm 2）✓')
 }
 
-/* ---------- 4. 旧格式扁平统计迁到当前方案 ---------- */
+/* ---------- 4. 旧格式扁平统计归入小鹤（而不是升级时停留的方案） ---------- */
 {
   const seed = {
     [PREF_KEY]: JSON.stringify({ open: true, surface: 'dock', scheme: 'mspy' }),
@@ -173,10 +173,13 @@ function typeChar(m, ch, pinyin) {
   const m = mount(seed)
   const store = storeOf(m.storage)
   ok(store.buckets, '旧格式未迁移成分桶结构')
-  ok(store.active === 'mspy', '旧数据应归到当前方案 mspy，实际: ' + store.active)
+  // 旧数据没有方案信息；当时插件只支持小鹤，所以统一归小鹤，
+  // 不能归给「升级那一刻停留的方案」，否则小鹤的记录会出现在别的方案里
+  const flypy = bucketOf(m.storage, 'flypy')
+  ok(flypy && flypy.chars['中'] && flypy.chars['中'].n === 4, '旧数据未归入小鹤')
   const mspy = bucketOf(m.storage, 'mspy')
-  ok(mspy && mspy.chars['中'] && mspy.chars['中'].n === 4, '旧数据迁移后丢了')
-  console.log('旧格式数据归入当前方案 ✓')
+  ok(!mspy || !Object.keys(mspy.chars || {}).length, '旧数据不应落在 mspy 桶里')
+  console.log('旧格式数据归入小鹤、不污染当前方案 ✓')
 }
 
 console.log(`smoke-per-scheme: ${checks} 项断言通过`)

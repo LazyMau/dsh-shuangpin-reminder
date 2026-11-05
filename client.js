@@ -786,6 +786,9 @@ window.__ModuleLoader__.load({
     const MIN_W = 340
     const MAX_W = 1720
 
+    /** 旧扁平统计（无方案信息）归属于哪个方案：那时默认且几乎都是小鹤 */
+    const LEGACY_STATS_SCHEME = 'flypy'
+
     /** 把任意历史形态的统计读成 { v, active, buckets }；每个方案一个桶 */
     function normalizeStatsStore(raw, activeId) {
       const out = { v: 3, active: activeId, buckets: {} }
@@ -796,16 +799,55 @@ window.__ModuleLoader__.load({
           out.buckets[id] = normalizeStats(raw.buckets[id])
         })
         if (typeof raw.active === 'string' && raw.active) out.active = raw.active
+        // 修复标记要一起读出来，否则每次启动都会重复搬运
+        if (raw.v3fixed) out.v3fixed = true
         return out
       }
-      // v2 及更早：只有一份全局统计。当时用的就是 prefs.scheme，归到那个方案下
+      // v2 及更早：只有一份全局统计，没有记录它属于哪个方案。
+      // 那时候插件还叫「小鹤双拼提醒」、默认方案固定是小鹤，所以归到小鹤最接近事实；
+      // 若归给「升级那一刻停留的方案」，用户切过方案再重启就会出现小鹤的数据
+      // 跑到别的方案里——这正是把旧数据误当成当前方案数据的原因。
       if (raw.chars || raw.keys || raw.events || raw.base) {
-        out.buckets[activeId] = normalizeStats(raw)
+        const legacyId = LEGACY_STATS_SCHEME
+        out.buckets[legacyId] = normalizeStats(raw)
+        // 当前停留的方案不是小鹤时，仍把 active 指回当前方案，
+        // 这样界面不会莫名跳回小鹤；旧数据留在小鹤桶里，切过去才看得到
+        out.legacyFrom = legacyId
       }
       return out
     }
 
-    /** 方案 id → 统计桶 id（自定义键位共用一个桶） */
+    /**
+     * 修复中间版本留下的错放：那一版把「没有方案信息的旧统计」归给了升级时
+     * 停留的方案。特征是「小鹤桶是空的，而某个别的方案桶里却有数据」。
+     * 把那个桶挪回小鹤，只搬一次（搬完打标记）。
+     */
+    function repairMisplacedLegacy(store) {
+      try {
+        if (!store || !store.buckets || store.v3fixed) return false
+        const flypy = store.buckets[LEGACY_STATS_SCHEME]
+        const flypyHas = flypy && Object.keys(flypy.chars || {}).length > 0
+        if (flypyHas) { store.v3fixed = true; return false }
+        const donors = Object.keys(store.buckets).filter(function (id) {
+          if (id === LEGACY_STATS_SCHEME) return false
+          const b = store.buckets[id]
+          return b && Object.keys(b.chars || {}).length > 0
+        })
+        // 只有一个别的方案有数据，才可能是错放；多个都有说明用户真用过那些方案
+        if (donors.length === 1) {
+          store.buckets[LEGACY_STATS_SCHEME] = store.buckets[donors[0]]
+          delete store.buckets[donors[0]]
+          store.v3fixed = true
+          return true
+        }
+        store.v3fixed = true
+        return false
+      } catch (error) {
+        return false
+      }
+    }
+
+    /** 方案 id → 统计桶 id */
     function schemeBucketId(prefs) {
       const id = prefs && prefs.scheme
       return typeof id === 'string' && id ? id : 'flypy'
@@ -864,11 +906,12 @@ window.__ModuleLoader__.load({
       const prefs = Object.assign({}, DEFAULT_PREFS, storedPrefs || {})
       const bucketId = schemeBucketId(prefs)
       const statsStore = normalizeStatsStore(storedStats, bucketId)
+      // 中间版本曾把旧统计错放到「升级时停留的方案」下，这里挪回小鹤
+      const repaired = repairMisplacedLegacy(statsStore)
       if (!statsStore.buckets[bucketId]) statsStore.buckets[bucketId] = normalizeStats(null)
       statsStore.active = bucketId
-      // 旧格式（扁平统计）迁移成分桶结构后立刻落盘，
-      // 否则下次启动还要再迁一次，中途崩溃会丢数据
-      if (storedStats && !storedStats.buckets) saveJSON(STAT_KEY, statsStore)
+      // 迁移/修复后立刻落盘，否则每次启动都要重算，中途崩溃还可能丢数据
+      if (repaired || (storedStats && !storedStats.buckets)) saveJSON(STAT_KEY, statsStore)
       // 升级后立刻重写一次镜像，把旧格式（含用户输入原文、无方案信息）清掉
       if (readMirrorLegacyLeftover()) writeMirror(mirrorPayload(statsStore, bucketId))
       const state = {
