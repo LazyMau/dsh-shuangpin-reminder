@@ -188,6 +188,8 @@ window.__ModuleLoader__.load({
       keyStateBad: '反复出错',
       keyStateWarn: '出过错',
       keyStateWatch: '打得慢（不代表不会）',
+      hintCandidates: '可试：',
+      hintConfirm: '{f} → {k}',
       autoHint: '卡住就亮键',
       statsLine: '对 {ok} / {total} · 连对 {streak}',
       poolCommon: '常用字',
@@ -254,6 +256,8 @@ window.__ModuleLoader__.load({
       keyStateBad: 'Repeated mistakes',
       keyStateWarn: 'Has had mistakes',
       keyStateWatch: 'Slower (not necessarily unknown)',
+      hintCandidates: 'Try: ',
+      hintConfirm: '{f} → {k}',
       autoHint: 'Reveal on stall',
       statsLine: 'Right {ok} / {total} · Streak {streak}',
       poolCommon: 'Common',
@@ -526,7 +530,7 @@ window.__ModuleLoader__.load({
     function normalizeStats(raw) {
       const out = {
         v: 2, rev: 0, chars: {}, keys: {}, events: [], echo: [],
-        stalls: [], wrong: {}, bigram: {}, lastChar: '', base: 420,
+        stalls: [], wrong: {}, bigram: {}, lastChar: '', base: 420, rules: {},
       }
       if (!raw || typeof raw !== 'object') return out
       if (raw.chars && typeof raw.chars === 'object') {
@@ -537,6 +541,11 @@ window.__ModuleLoader__.load({
       if (raw.keys && typeof raw.keys === 'object') {
         Object.keys(raw.keys).forEach(function (k) {
           out.keys[k] = normalizeKeyEntry(raw.keys[k])
+        })
+      }
+      if (raw.rules && typeof raw.rules === 'object') {
+        Object.keys(raw.rules).forEach(function (id) {
+          out.rules[id] = normalizeRule(raw.rules[id])
         })
       }
       if (Array.isArray(raw.events)) out.events = raw.events.slice(0, 30)
@@ -580,7 +589,7 @@ window.__ModuleLoader__.load({
 
     /** 键级条目：同样把「明确错误」与「慢/改码」分开 */
     function normalizeKeyEntry(entry) {
-      if (!entry || typeof entry !== 'object') return { n: 0, bad: 0, slow: 0, fix: 0, hint: 0 }
+      if (!entry || typeof entry !== 'object') return { n: 0, bad: 0, slow: 0, fix: 0, hint: 0, ok: 0 }
       const hasEvidence = typeof entry.slow === 'number' || typeof entry.fix === 'number'
       const legacyBad = Number(entry.bad) || 0
       return {
@@ -589,7 +598,78 @@ window.__ModuleLoader__.load({
         slow: hasEvidence ? (Number(entry.slow) || 0) : legacyBad,
         fix: Number(entry.fix) || 0,
         hint: Number(entry.hint) || 0,
+        // ok = 这个键「顺利打对」的次数，用来判断熟练度并逐步淡化提示。
+        // 旧数据没有这个字段，从 0 开始累计即可，不需要迁移。
+        ok: Number(entry.ok) || 0,
       }
+    }
+
+    /**
+     * 规则级记忆：真正该被记住的不是「P 这个物理键」，而是「ie 落在 P」这条规则。
+     *
+     * 为什么必须是规则：
+     *   同一个键在小鹤里承载多个韵母（如 ong/iong 共用），
+     *   你「P 上打 iu 很熟」不代表「P 上打 ie 也熟」。
+     *   如果按物理键合并熟练度，ie 这条规则会被 iu 的成功记录掩盖，永远淡不掉或永远亮着。
+     *   反过来，「些」上的纠正也应该能帮到「写」，因为它们共用 ie → P 这条规则。
+     *
+     * 存什么：
+     *   n        遇到次数
+     *   solo     提示出现前就独立完成
+     *   helped   提示已经显示后完成（≈ 辅助完成，不能算掌握）
+     *   conf     被确认纠正过几次
+     *   wrong    和哪些规则混淆过（规则 id → 次数）
+     *   lastAt   最后一次纠正的时间，用来做隔天复验
+     */
+    function normalizeRule(entry) {
+      const out = { n: 0, solo: 0, helped: 0, conf: 0, wrong: {}, lastAt: 0 }
+      if (!entry || typeof entry !== 'object') return out
+      out.n = Number(entry.n) || 0
+      out.solo = Number(entry.solo) || 0
+      out.helped = Number(entry.helped) || 0
+      out.conf = Number(entry.conf) || 0
+      out.lastAt = Number(entry.lastAt) || 0
+      if (entry.wrong && typeof entry.wrong === 'object') {
+        Object.keys(entry.wrong).forEach(function (id) {
+          const v = Number(entry.wrong[id]) || 0
+          if (v > 0) out.wrong[id] = v
+        })
+      }
+      return out
+    }
+
+    /** 规则 id：方案 + 种类(f=韵母 / i=声母) + 具体拼音单位 */
+    function ruleIdOf(schemeId, kind, unit) {
+      return String(schemeId || '') + '|' + kind + '|' + String(unit || '')
+    }
+
+    function ruleOf(stats, schemeId, kind, unit) {
+      const rules = (stats && stats.rules) || {}
+      return rules[ruleIdOf(schemeId, kind, unit)] || null
+    }
+
+    /**
+     * 提示档位，唯一的升级依据是「提示出现前能不能自己完成」。
+     *
+     *   2 = 明确提示（正确键 + 候选字）
+     *   1 = 只给位置（淡环，不给答案）
+     *   0 = 不再自动提示（保留主动查看）
+     *
+     * 关键取舍：
+     *   1. 累计打对次数不能作为依据——没有错误时，一次打对就能算出很高的熟练度，
+     *      而且历史成功很多会掩住「最近又卡了」。
+     *   2. 提示已经显示过之后才打对，只能算辅助完成（helped），不能算独立掌握。
+     *      网页没法知道你到底看没看，所以按最保守的方式：显示过就算辅助。
+     *   3. 最近又发生纠正 → 立刻恢复帮助。
+     */
+    function ruleLevel(rule) {
+      if (!rule) return 2                    // 新规则：给足帮助
+      const since = Math.max(0, (rule.solo || 0) - (rule.conf || 0) * 2)
+      if (rule.conf > 0 && since < 3) return 2   // 刚纠正过，还没证明能独立
+      if (rule.helped > 0 && since < 6) return 1 // 还需要帮助，但降级为只给位置
+      if (since >= 10) return 0                  // 独立完成足够多，退出
+      if (since >= 5) return 1
+      return 2
     }
 
     /** 从旧包名的存储键迁移一次；新键已有数据时不动 */
@@ -708,25 +788,92 @@ window.__ModuleLoader__.load({
      *
      * 用完整双拼码的第二个字符比较，零声母音节（爱 ai、而 er）也因此能正确归因。
      */
-    function confusionPairs(trace, finalValue, sch) {
+    /**
+     * 从预编辑轨迹里提取「同一个音节位置上的纠正」。
+     *
+     * 严格到什么程度才算一次纠正：必须同时满足
+     *   1. 能对齐到**同一个音节位置**（同一个已完成的字前缀 + 同一个声母）
+     *   2. 那次尝试确实被**撤销或替换**了（后面出现了不是它「延长」的状态）
+     *   3. 被替换成的韵母和最终答案不同
+     *
+     * 为什么第 2 条是必须的：
+     *   正常输入 xian 时中间一定会出现 x、xi、xia。
+     *   它们不是「打错又改回来」，只是还没打完。
+     *   旧实现把「试过的韵母和最终不同」一律算错，
+     *   于是每一次正常输入都会凭空产生好几个错键，弱键率完全失真。
+     *
+     * 宁可不归因：解析不出是哪个韵母就跳过，留作观察（stalls 已经记了整条轨迹）。
+     * 错的归因比没有归因更糟——它会把你本来会打的键标成不会。
+     */
+    function samePositionCorrections(trace, targetValue, sch) {
       const out = []
-      if (!finalValue) return out
-      const finalParsed = longestSuffixPinyin(finalValue)
-      if (!finalParsed) return out
-      const correctCode = codeOf(finalParsed.i, finalParsed.f, sch)
-      if (correctCode.length !== 2) return out
-      const correctKey = correctCode.charAt(1)
-      for (let i = 0; i + 1 < trace.length; i += 1) {
-        const before = trace[i]
-        const after = trace[i + 1]
-        if (after.length >= before.length || !/^[a-z']+$/.test(before)) continue
-        const candidate = after + before.slice(after.length)
-        const parsed = longestSuffixPinyin(candidate)
-        if (!parsed || parsed.i !== finalParsed.i) continue
-        const pressedCode = codeOf(parsed.i, parsed.f, sch)
-        if (pressedCode.length !== 2) continue
-        const pressed = pressedCode.charAt(1)
-        if (pressed !== correctKey) out.push({ correct: correctKey, pressed: pressed })
+      if (!targetValue || !trace || trace.length < 2) return out
+      const target = longestSuffixPinyin(targetValue)
+      if (!target) return out
+      const targetCode = codeOf(target.i, target.f, sch)
+      if (targetCode.length !== 2) return out
+      const targetKey = targetCode.charAt(1)
+
+      // 目标音节在原文里的文本形态（如 xie），它前面就是已完成的字
+      const sylText = target.i + target.f
+      const lower = String(targetValue).toLowerCase()
+      if (!sylText || lower.slice(lower.length - sylText.length) !== sylText) return out
+      const prefix = lower.slice(0, lower.length - sylText.length)
+
+      // rest = 目标音节那一段，从声母开始
+      function restOf(value) {
+        const v = String(value || '').toLowerCase()
+        if (prefix && v.slice(0, prefix.length) !== prefix) return null
+        const rest = v.slice(prefix.length)
+        if (!rest || rest.charAt(0) !== target.i) return null
+        return rest
+      }
+
+      // 从 rest 里取出「这次尝试的韵母」；取不出就不下结论
+      function finalOf(rest) {
+        if (!rest) return null
+        let mat = rest.slice(target.i.length)
+        if (mat.charAt(0) === "'") mat = mat.slice(1)
+        if (!mat) return null
+        return FINAL_ORDER.indexOf(mat) >= 0 ? mat : null
+      }
+
+      const entries = trace.concat([targetValue])
+      const rests = entries.map(restOf)
+
+      const seen = {}
+      for (let i = 0; i < rests.length - 1; i += 1) {
+        const rest = rests[i]
+        if (!rest) continue
+        const attempted = finalOf(rest)
+        if (!attempted || attempted === target.f) continue
+        // 「被撤销」的判定：必须是这一段的**局部最长点**，且紧接着变短。
+        //
+        // 为什么不能只看「后面有状态不是它的延长」：
+        //   退格本身会产生一串越来越短的中间态（xian → xi → x），
+        //   那样会把 xian、xi 全部记成尝试，一次退格凭空多出好几个错键。
+        // 为什么不能只看「紧接着变短」：
+        //   退格链里的每个节点都满足，同样会重复计数。
+        // 两个条件一起用，才只剩「打完一段、随后被删或改写」的那一个点：
+        //   x, xi, xia, xian, xi, x  → 只有 xian 记为尝试
+        //   na'x, na'xie, na'x, na'x'ian, na'x  → 只有 ian 记为尝试
+        const restLen = rest.length
+        const nextRest = rests[i + 1]
+        if (nextRest === null || nextRest.length >= restLen) continue
+        if (i > 0 && rests[i - 1] !== null && rests[i - 1].length > restLen) continue
+        const code = codeOf(target.i, attempted, sch)
+        if (code.length !== 2) continue
+        const key = code.charAt(1)
+        if (key === targetKey) continue
+        if (seen[key]) continue
+        seen[key] = true
+        out.push({
+          correct: targetKey,
+          pressed: key,
+          initial: target.i,
+          correctFinal: target.f,
+          pressedFinal: attempted,
+        })
       }
       return out
     }
@@ -850,6 +997,34 @@ window.__ModuleLoader__.load({
       // 旧数据只有 bad，迁移时按慢处理，避免把历史误当明确错误。
       const slowOnly = slow
       const sch = schemeOf(store.state.prefs)
+      const schemeId = schemeBucketId(store.state.prefs)
+      const shown = (store.state.ui && store.state.ui.shownRules) || {}
+      st.rules = st.rules || {}
+
+      // 已确认的纠正（同一音节位置上被撤销或替换过），只作用于最后一个音节
+      const confusions = info.confusions || []
+      const correctedFinal = confusions.length ? String(confusions[0].correctFinal || '') : ''
+
+      /**
+       * 登记一条规则的「这次表现」。
+       * 只有被确认纠正的规则记 conf，其余算 solo 或 helped，
+       * 而 helped 不能推动淡化——这是整套渐退机制的前提。
+       */
+      function markRule(kind, unit, corrected) {
+        if (!unit) return
+        const id = ruleIdOf(schemeId, kind, unit)
+        const rule = st.rules[id] || (st.rules[id] = normalizeRule(null))
+        rule.n += 1
+        if (corrected) {
+          rule.conf += 1
+          rule.lastAt = Date.now()
+        } else if (shown[id]) {
+          rule.helped += 1
+        } else {
+          rule.solo += 1
+        }
+      }
+
       const codes = []
       for (let i = 0; i < chars.length; i += 1) {
         const ch = chars[i]
@@ -862,10 +1037,34 @@ window.__ModuleLoader__.load({
         entry.at = Date.now()
         if (slowOnly) entry.slow = (entry.slow || 0) + 1
         if (backs >= 2) entry.fix = (entry.fix || 0) + 1
+        // 规则级：声母规则与韵母规则分别记账。
+        // 纠正只可能落在最后一个音节上，所以这里先按「没被纠正」记，
+        // 下面再针对最后一个字的韵母规则单独修正。
+        const py = pinyinOf(ch)
+        const parsed = py ? parsePinyin(py) : null
+        if (parsed) {
+          markRule('i', parsed.i, false)
+          // 纠正只可能落在最后一个音节的韵母上
+          const isLast = i === chars.length - 1
+          markRule('f', parsed.f, Boolean(isLast && correctedFinal && parsed.f === correctedFinal))
+        }
+        // 顺利打对（不慢、没退格）才累积熟练度：
+        // 熟练度决定提示要不要淡化，所以只认「干净的一次」，
+        // 卡了半天最后打对不算练熟。
+        if (!slowOnly && !backs) {
+          const k1 = code.charAt(0)
+          const k2 = code.charAt(1)
+          const e1 = st.keys[k1] || (st.keys[k1] = normalizeKeyEntry(null))
+          const e2 = st.keys[k2] || (st.keys[k2] = normalizeKeyEntry(null))
+          e1.ok = (e1.ok || 0) + 1
+          e2.ok = (e2.ok || 0) + 1
+        }
       }
       st.events.unshift({
         t: Date.now(), word: chars.slice(0, 12).join(''), codes: codes,
         ms: Math.round(ms), slow: slow, backs: backs || 0,
+        // 记下这次被纠正的韵母，上屏反馈只确认这一个位置
+        correctedFinal: correctedFinal || '',
       })
       if (st.events.length > 30) st.events.length = 30
 
@@ -901,6 +1100,19 @@ window.__ModuleLoader__.load({
           if (lastCh) {
             const ce = st.chars[lastCh] || (st.chars[lastCh] = normalizeCharEntry(null))
             ce.bad = (ce.bad || 0) + 1
+          }
+          // 规则级：把「ie 和 ian 混过」这种关系记到正确规则名下，
+          // 下次在同一个声母后犹豫时，就可以只突出正确位置。
+          if (correctedFinal) {
+            const correctId = ruleIdOf(schemeId, 'f', correctedFinal)
+            const rule = st.rules[correctId]
+            if (rule) {
+              confusions.forEach(function (pair) {
+                const wrongId = ruleIdOf(schemeId, 'f', pair.pressedFinal)
+                if (wrongId === correctId) return
+                rule.wrong[wrongId] = (rule.wrong[wrongId] || 0) + 1
+              })
+            }
           }
         }
       }
@@ -947,11 +1159,12 @@ window.__ModuleLoader__.load({
       const map = {}
       function bump(key, entry) {
         if (!key || !entry) return
-        const acc = map[key] || (map[key] = { n: 0, bad: 0, slow: 0, fix: 0 })
+        const acc = map[key] || (map[key] = { n: 0, bad: 0, slow: 0, fix: 0, ok: 0 })
         acc.n += entry.n || 0
         acc.bad += entry.bad || 0
         acc.slow += entry.slow || 0
         acc.fix += entry.fix || 0
+        acc.ok += entry.ok || 0
       }
       const chars = stats.chars || {}
       for (const ch in chars) {
@@ -997,12 +1210,48 @@ window.__ModuleLoader__.load({
     const MIN_BAD = 3         // 判 bad 至少要有这么多次明确错
     const BAD_RATE = 0.4      // 判 bad 的错误率下限
 
+    /**
+     * 熟练度 0~1。用来让提示**随练习逐步淡化**——
+     * 这是这套设计能不能真的练出肌肉记忆的关键：
+     * 提示如果永远一样亮，你会一直依赖它，只是「跟着灯打」而不是「记住键位」。
+     *
+     *   ok   = 顺利打对的次数（累加）
+     *   bad  = 明确错的次数
+     * 错一次的代价约为对一次的 3 倍，所以 30 对 + 10 错 ≈ 0.5，
+     * 要淡出必须真的对得足够多。
+     *
+     * 用比值而不是时间衰减：不需要记时间戳，也不会因为「很久没打」
+     * 就把已经练熟的键重新点亮（那反而是在打扰）。
+     */
+    function masteryOf(entry) {
+      if (!entry) return 0
+      const ok = Math.max(0, entry.ok || 0)
+      const bad = Math.max(0, entry.bad || 0)
+      if (!ok && !bad) return 0
+      return Math.max(0, Math.min(1, ok / (ok + bad * 3)))
+    }
+
+    /** 淡化档位：2=全亮，1=淡，0=基本不提示（已经熟了，靠自己回忆） */
+    const FADE_FULL = 0.45   // 低于这个：正常提示
+    const FADE_LIGHT = 0.75  // 高于 FULL、低于这个：淡提示
+    function hintFadeOf(entry) {
+      const m = masteryOf(entry)
+      if (m >= FADE_LIGHT) return 0
+      if (m >= FADE_FULL) return 1
+      return 2
+    }
+
     function heatLevelOf(weakness, friction, entry) {
       const n = entry && entry.n ? entry.n : 0
       const bad = entry && entry.bad ? entry.bad : 0
+      // 练熟了就不再标红：熟练度高时整体降一档，
+      // 否则「三个月前错过 5 次」会永远挂着一个红边。
+      if (masteryOf(entry) >= FADE_LIGHT) return null
       // 明确错误优先：有足够错样本才可能进 warn/bad
       if (weakness !== null && n >= MIN_CONFIDENT) {
-        if (bad >= MIN_BAD && weakness >= BAD_RATE) return 'bad'
+        if (bad >= MIN_BAD && weakness >= BAD_RATE) {
+          return masteryOf(entry) >= FADE_FULL ? 'warn' : 'bad'
+        }
         if (bad >= 1 && weakness >= 0.2) return 'warn'
       }
       // 没有明确错误时，慢/改码只给「待观察」，绝不标红
@@ -1052,6 +1301,71 @@ window.__ModuleLoader__.load({
       // 有明确错的永远排在只有慢的前面
       items.sort(function (a, b) { return (b.bad - a.bad) || (b.slow - a.slow) || (b.n - a.n) })
       return items.slice(0, 40)
+    }
+
+    /**
+     * 给当前声母挑候选韵母。分两层判断，顺序不能颠倒：
+     *   1. 相关性：哪些韵母和这次输入有关（最近纠正过的规则 + 你自己用过的）
+     *   2. 帮助需求：这条规则现在还需不需要提示（ruleLevel 决定强度，0 就直接不出现）
+     *
+     * 为什么不能只按「个人高频」取前两个：
+     *   常打往往意味着已经熟了，少打反而更需要帮助。
+     *   只按频率排会把最需要帮助的那个挤掉。
+     */
+    function finalHintCandidates(stats, schemeId, initial, sch) {
+      const out = []
+      const seen = {}
+      function consider(final, reason) {
+        if (!final || seen[final]) return
+        const code = codeOf(initial, final, sch)
+        if (code.length !== 2) return
+        seen[final] = true
+        out.push({ final: final, key: code.charAt(1), reason: reason })
+      }
+      // 1) 最近还在被纠正的韵母规则：最该帮，而且与当前声母无关
+      //    （ie → P 这条规则本身容易混，换成别的声母也还是容易混）
+      const rules = stats.rules || {}
+      Object.keys(rules).forEach(function (id) {
+        const parts = String(id).split('|')
+        if (parts.length !== 3 || parts[0] !== schemeId || parts[1] !== 'f') return
+        const rule = rules[id]
+        if (!rule || !rule.conf) return
+        if (ruleLevel(rule) !== 2) return
+        consider(parts[2], 'conf')
+      })
+      // 2) 你自己在这个声母下真正用过的韵母
+      personalFinalsFor(stats, initial).forEach(function (row) {
+        consider(row.final, 'mine')
+      })
+      return out
+    }
+
+    /**
+     * 你在某个声母下**实际用过**的韵母，按次数排序。
+     *
+     * 只回答「相关性」：哪些韵母和这个声母有关。
+     * 「谁更需要帮助」是另一层判断，交给 finalHintCandidates 结合混淆历史与熟练度决定。
+     * 混在一起会导致一个错误结论：常打 = 该提示（其实常打往往已经很熟）。
+     */
+    function personalFinalsFor(stats, initial) {
+      const out = []
+      if (!initial) return out
+      const chars = stats.chars || {}
+      const tally = {}
+      for (const ch in chars) {
+        const entry = chars[ch]
+        if (!entry || !entry.n) continue
+        const pinyin = pinyinOf(ch)
+        if (!pinyin) continue
+        const parsed = parsePinyin(pinyin)
+        if (!parsed || parsed.i !== initial) continue
+        tally[parsed.f] = (tally[parsed.f] || 0) + entry.n
+      }
+      Object.keys(tally).forEach(function (f) {
+        out.push({ final: f, n: tally[f] })
+      })
+      out.sort(function (a, b) { return b.n - a.n })
+      return out
     }
 
     function poolItems(stats, sch, pool) {
@@ -1122,18 +1436,57 @@ window.__ModuleLoader__.load({
       return isEditable(el) && !inSelfUI(el)
     }
 
+    /**
+     * 停顿多久算「想了想」。太短会跟着每次按键闪，太长就帮不上了。
+     * 900ms 大致是「卡住」和「正常换气」的分界。
+     */
+    const PAUSE_MS = 900
+
     function installTypingCapture(store) {
       let composing = null
       let compStart = 0
       let lastCommitAt = 0
       let chainTime = -1e9
+      // 本次合成里已经**显示过**提示的规则 id。
+      // 用途只有一个：把「看过提示才打对」和「自己想起来」区分开——
+      // 前者只能算辅助完成，不能用来让提示淡化。
+      // 网页无法确认用户是否真的看了，所以按最保守的认定：显示过就算辅助。
+      let shownRules = {}
       const ui = store.state.ui
+      // 让渲染层按下标读写同一份「已显示」记录
+      ui.shownRules = shownRules
+      ui.markHintShown = function (ruleId) {
+        if (ruleId) ui.shownRules[ruleId] = true
+      }
+
+      // 停顿计时器：连续打字时不打扰，停下来想的时候才给提示。
+      // 这是「给用户留出自己回忆的机会」——提示如果跟着每一次按键出现，
+      // 就变成了阅读任务，练不出回忆。
+      let pauseTimer = null
+      let pauseAt = 0
+      function clearPause() {
+        if (pauseTimer) { window.clearTimeout(pauseTimer); pauseTimer = null }
+      }
+      function schedulePause() {
+        clearPause()
+        pauseAt = Date.now()
+        pauseTimer = window.setTimeout(function () {
+          pauseTimer = null
+          if (!composing || !ui.live) return
+          ui.live = Object.assign({}, ui.live, { paused: true, pausedAt: Date.now() })
+          store.notify()
+        }, PAUSE_MS)
+      }
 
       function onStart(event) {
         if (!isTypingTarget(event.target)) return
         composing = { at: window.performance.now(), backs: 0, el: event.target, trace: [], shrinks: 0, lastData: '' }
         compStart = composing.at
+        // 每次开始合成重置「已显示提示」，只对本次输入有效
+        shownRules = {}
+        ui.shownRules = shownRules
         ui.live = { text: '', at: Date.now(), backs: 0 }
+        schedulePause()
         pushEcho(store, 0, '▶ 开始合成')
         store.notify()
       }
@@ -1148,7 +1501,9 @@ window.__ModuleLoader__.load({
           }
           composing.lastData = text
         }
-        ui.live = { text: text, at: Date.now(), backs: composing.backs }
+        // paused 每次更新都清掉：又开始打了，就重新安静下来，等下一次停顿
+        ui.live = { text: text, at: Date.now(), backs: composing.backs, shrinks: composing.shrinks }
+        schedulePause()
         pushEcho(store, window.performance.now() - compStart, text)
         store.notify()
       }
@@ -1157,6 +1512,7 @@ window.__ModuleLoader__.load({
       }
       function onEnd(event) {
         if (!composing) return
+        clearPause()
         if (!isTypingTarget(event.target)) { composing = null; return }
         const elapsed = window.performance.now() - composing.at
         const backs = composing.backs
@@ -1171,7 +1527,7 @@ window.__ModuleLoader__.load({
         lastCommitAt = Date.now()
         const chained = Date.now() - chainTime < 8000
         chainTime = Date.now()
-        const confusions = confusionPairs(trace, finalPreedit, schemeOf(store.state.prefs))
+        const confusions = samePositionCorrections(trace, finalPreedit, schemeOf(store.state.prefs))
         recordCommit(store, text, elapsed, backs, {
           chained: chained,
           trace: trace,
@@ -1307,23 +1663,56 @@ window.__ModuleLoader__.load({
         border: '1px solid var(--dsw-alias-border-l1, #e3e6ea)',
         borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
         fontFamily: 'inherit',
-        transition: 'box-shadow 120ms ease, transform 120ms ease',
+        transition: 'box-shadow 120ms ease, background 120ms ease',
       },
-      // —— 长期状态：只改边框，不动外环 ——
-      keyBad: { borderColor: 'var(--dsw-alias-state-error-primary, #d64545)' },
-      keyWarn: { borderColor: 'var(--dsw-alias-state-warn-primary, #c98a1b)' },
-      keyWatch: { borderStyle: 'dashed', borderColor: 'var(--dsw-alias-label-tertiary, #9aa1ab)' },
-      // —— 短时提示：只加外环，不改边框色，这样弱键的红边不会被预测盖掉 ——
-      ringHot: {
-        boxShadow: '0 0 0 2px var(--dsw-alias-brand-primary, #2b6cf6)',
-        transform: 'translateY(-1px)',
+      /**
+       * 视觉语义固定成四种，互不混用——用户不该靠猜颜色来理解提示：
+       *   轻填充 / 细轮廓  = 可以考虑的候选位置（不确定，不强调谁第一）
+       *   清晰实线轮廓      = 纠正后确认的正确位置（这次的答案）
+       *   底部小标记        = 长期需要练习的映射（打字时不抢注意力，详情在记录页）
+       *   键上高亮韵母      = 提示命中时，凸显「这个韵母在这个键上」
+       *
+       * 长期状态不再用整圈边框色。
+       * 原因：边框和提示外环挤在同一圈，红边 + 预测环同时出现时，
+       * 用户分不清「哪个是我该看的」，而且长期弱点本来就该在打字时退居次要。
+       */
+      fillCandidate: {
+        background: 'var(--dsw-alias-brand-primary-weak, rgba(43, 108, 246, 0.10))',
+        boxShadow: '0 0 0 1px rgba(43, 108, 246, 0.30)',
       },
+      fillCandidateStrong: {
+        background: 'var(--dsw-alias-brand-primary-weak, rgba(43, 108, 246, 0.16))',
+        boxShadow: '0 0 0 1.5px rgba(43, 108, 246, 0.45)',
+      },
+      // 纠正后确认：清晰实线轮廓。不动位置，眼睛和手记住的是固定坐标。
+      ringConfirm: {
+        boxShadow: '0 0 0 2.5px var(--dsw-alias-brand-primary, #2b6cf6)',
+      },
+      // 已经打完的音节：只确认按过，轻微即可
+      ringTyped: { boxShadow: '0 0 0 1px var(--dsw-alias-border-l2, #cfd4da)' },
       ringHover: { boxShadow: '0 0 0 1px var(--dsw-alias-brand-primary, #2b6cf6)' },
-      ringPredict: { boxShadow: '0 0 0 1.5px var(--dsw-alias-label-primary, #1a1d21)' },
-      ringPredictStrong: {
-        boxShadow: '0 0 0 2.5px var(--dsw-alias-label-primary, #1a1d21)',
-        transform: 'translateY(-1px)',
+      // 预测下一字：沿用「候选」语义，不再用深色强轮廓冒充确定答案
+      ringPredict: { boxShadow: '0 0 0 1.5px var(--dsw-alias-border-l2, #cfd4da)' },
+      ringPredictStrong: { boxShadow: '0 0 0 2px var(--dsw-alias-label-tertiary, #9aa1ab)' },
+      ringPredictFaint: { boxShadow: '0 0 0 1px var(--dsw-alias-border-l1, #e3e6ea)' },
+      ringPredictStrongFaint: { boxShadow: '0 0 0 1px var(--dsw-alias-border-l2, #cfd4da)' },
+      ringPredictGhost: { boxShadow: '0 0 0 1px var(--dsw-alias-border-l1, #e3e6ea)', borderStyle: 'dashed' },
+      ringPredictStrongGhost: { boxShadow: '0 0 0 1px var(--dsw-alias-border-l1, #e3e6ea)', borderStyle: 'dashed' },
+      // F / J 定位点：把屏幕键位对应到实体键盘的手感，和真实键盘一致
+      homeDot: {
+        position: 'absolute', bottom: 3, left: '50%', marginLeft: -1.5,
+        width: 3, height: 3, borderRadius: 1.5,
+        background: 'var(--dsw-alias-label-tertiary, #9aa1ab)',
       },
+      // 键上被提示命中的韵母：凸显「韵母 → 字母键」这条对应关系
+      keyFinalHit: {
+        fontWeight: 700,
+        color: 'var(--dsw-alias-brand-primary, #2b6cf6)',
+        background: 'var(--dsw-alias-brand-primary-weak, rgba(43, 108, 246, 0.14))',
+        borderRadius: 3,
+        padding: '0 3px',
+      },
+      keyLetterStrong: { color: 'var(--dsw-alias-label-primary, #1a1d21)', fontWeight: 700 },
       keyPredictChar: {
         position: 'absolute', top: 1, right: 3, fontWeight: 600,
         color: 'var(--dsw-alias-label-primary, #1a1d21)',
@@ -1342,6 +1731,13 @@ window.__ModuleLoader__.load({
         cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
       },
       hint: { fontSize: 10.5, lineHeight: 1.55, color: 'var(--dsw-alias-label-secondary, #6b7280)' },
+      // 键盘下方的状态行：固定高度，跟随输入出现，不依赖悬停、不引起布局跳动
+      statusLine: {
+        fontSize: 10.5, lineHeight: '16px', height: 16, marginTop: 4, flexShrink: 0,
+        textAlign: 'center', color: 'var(--dsw-alias-label-secondary, #6b7280)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      },
       hintStrong: { color: 'var(--dsw-alias-label-primary, #1a1d21)' },
       hintScheme: { fontSize: 9.5, color: 'var(--dsw-alias-label-secondary, #6b7280)', opacity: 0.75, marginTop: 1 },
       schemeBar: {
@@ -1516,7 +1912,9 @@ window.__ModuleLoader__.load({
           last = event.t
           if (timer) window.clearTimeout(timer)
           setFlash({ key: event.t, event: event })
-          timer = window.setTimeout(function () { setFlash(null) }, 4500)
+          // 只要有纠正就短暂确认；正常上屏不给强反馈，避免和下一字提示抢注意力
+          const hold = event.correctedFinal ? 900 : 500
+          timer = window.setTimeout(function () { setFlash(null) }, hold)
         })
       }, [store])
       return flash
@@ -1532,27 +1930,47 @@ window.__ModuleLoader__.load({
       const item = props.item
       const size = props.size
       const sch = props.sch
-      const finalText = item.f.map(finalLabel).join(' / ')
-      // 边框（长期状态）与 外环（短时提示）分层叠加，互不覆盖：
-      //   边框 = 键自身的健康度（红=反复错 / 黄=有错 / 灰=待观察）
-      //   外环 = 这一刻的提示（蓝=刚按过 / 深色=预测）
-      // 旧实现让预测覆盖了红边，导致「既弱又被预测」的键丢掉弱键信息。
+      const pred = props.predict || null
+      // 提示命中的那个韵母（例如 P 键上的 ie），单独凸显，回答「韵母落在哪个字母」。
+      const hitFinal = pred && pred.final ? pred.final : ''
+      const finalText = item.f.map(function (f) {
+        return f === hitFinal ? finalLabel(f) : finalLabel(f)
+      }).join(' / ')
+
+      /**
+       * 四种视觉语义，按优先级从低到高叠加，互不覆盖：
+       *   1. 底部小标记  = 长期需要练习（不抢注意力）
+       *   2. 轻填充      = 候选位置（可以试，但不确定）
+       *   3. 实线轮廓    = 纠正后确认的正确位置（这次的答案）
+       *   4. 键上韵母高亮 = 命中时凸显「韵母 → 字母键」
+       * 位置和尺寸永远不变，眼睛和手记住的是稳定坐标。
+       */
       const style = Object.assign(
         {},
         S.key,
         { width: size.w, height: size.h },
-        props.level === 'bad' ? S.keyBad
-          : props.level === 'warn' ? S.keyWarn
-            : props.level === 'watch' ? S.keyWatch : null,
-        props.hot ? S.ringHot : (props.hovered && !props.predict ? S.ringHover : null),
-        props.predict ? (props.predict.strong ? S.ringPredictStrong : S.ringPredict) : null,
+        pred && pred.kind === 'confirm' ? S.ringConfirm : null,
+        pred && pred.kind === 'candidate' ? (pred.strong ? S.fillCandidateStrong : S.fillCandidate) : null,
+        pred && pred.kind === 'typed' ? S.ringTyped : null,
+        pred && pred.kind === 'next' ? (pred.faint ? S.ringPredictFaint : (pred.strong ? S.ringPredictStrong : S.ringPredict)) : null,
+        props.hovered && !pred ? S.ringHover : null,
       )
       const finalStyle = Object.assign(
         {},
         S.keyFinal,
         { fontSize: Math.max(9, Math.min(30, size.w * 0.24)) },
-        props.level === 'bad' ? { color: 'var(--dsw-alias-state-error-primary, #d64545)', fontWeight: 600 } : null,
+        hitFinal ? S.keyFinalHit : null,
       )
+      const letterStyle = Object.assign(
+        {},
+        S.keyLetter,
+        { fontSize: Math.max(8, Math.min(18, size.w * 0.2)) },
+        pred ? S.keyLetterStrong : null,
+      )
+      // 长期弱点的提示降级为底部小标记，不再用整圈红/黄边框
+      const dotColor = props.level === 'bad' ? HEAT_COLORS.bad
+        : props.level === 'warn' ? HEAT_COLORS.warn
+          : props.level === 'watch' ? HEAT_COLORS.watch : ''
       return h(
         'button',
         {
@@ -1571,31 +1989,18 @@ window.__ModuleLoader__.load({
               : props.level === 'warn' ? ' ' + props.t('keyStateWarn')
                 : props.level === 'watch' ? ' ' + props.t('keyStateWatch') : ''),
         },
-        h('span', { style: Object.assign({}, S.keyLetter, { fontSize: Math.max(8, Math.min(18, size.w * 0.2)) }) }, item.k),
+        h('span', { style: letterStyle }, item.k),
         item.s ? h('span', { style: Object.assign({}, S.keyInitial, { fontSize: Math.max(8, Math.min(18, size.w * 0.19)) }) }, item.s) : null,
         h('span', { style: finalStyle }, finalText),
-        props.predict && props.predict.ch
+        // 候选汉字固定在右上角，不随键帽内容改变位置
+        pred && pred.ch
           ? h('span', {
-              style: Object.assign(
-                {},
-                item.s ? S.keyPredictCharLow : S.keyPredictChar,
-                { fontSize: Math.max(8, size.w * 0.19) },
-              ),
-            }, props.predict.ch)
+              style: Object.assign({}, S.keyPredictChar, { fontSize: Math.max(8, size.w * 0.19) }),
+            }, pred.ch)
           : null,
-        props.level
-          ? h('span', {
-              style: Object.assign(
-                {},
-                S.heatBar,
-                props.level === 'bad'
-                  ? { height: 4, background: HEAT_COLORS.bad }
-                  : props.level === 'warn'
-                    ? { background: HEAT_COLORS.warn }
-                    : { height: 2, background: HEAT_COLORS.watch },
-              ),
-            })
-          : null,
+        // F / J 定位点，和实体键盘一致
+        item.k === 'F' || item.k === 'J' ? h('span', { style: S.homeDot }) : null,
+        dotColor ? h('span', { style: Object.assign({}, S.heatBar, { height: 3, background: dotColor }) }) : null,
       )
     }
 
@@ -1615,14 +2020,6 @@ window.__ModuleLoader__.load({
         [stats, stats.rev, sch],
       )
       const rowsData = React.useMemo(function () { return buildKeyRows(sch) }, [sch])
-      const hotKeys = {}
-      if (flash && flash.event && flash.event.codes) {
-        flash.event.codes.forEach(function (code) {
-          if (!code) return
-          hotKeys[code.charAt(0)] = true
-          hotKeys[code.charAt(1)] = true
-        })
-      }
 
       const inner = width - 24
       const gap = Math.max(3, Math.round(inner * 0.01))
@@ -1632,43 +2029,104 @@ window.__ModuleLoader__.load({
       const blockW = 10 * keyW + 9 * gap
       const size = { w: keyW, h: keyH }
 
-      /* 框选提示：
-         - 合成中、末尾音节不完整（只打了声母）→ 框选该声母常用字的韵母键，并标出候选字
-         - 合成中、音节已完整 → 轻框已按下的键（确认）
-         - 平时（刚上屏）→ 框选「下一个字」的预测键（个人历史优先，常用接续兜底） */
+      /* 提示分阶段，同一时刻只表达一个动作：
+           - 刚上屏 → 只短暂确认**被纠正的那个韵母键**（不点亮整次提交的所有键）
+           - 合成中、当前音节已完整 → 轻确认已按下的键（不泄露答案）
+           - 合成中、只打了声母 → 停顿或撤销过才给少量候选
+         阶段一换，上一阶段的提示立即结束，避免残留高亮和下一次提示抢注意力。 */
       const predictMap = {}
-      function markPredict(key, ch, strong) {
+      const ui = store.state.ui
+      function markPredict(key, ch, strong, kind, final) {
         if (!key) return
-        if (!predictMap[key] || strong) predictMap[key] = { ch: ch || '', strong: strong }
+        const prev = predictMap[key]
+        // 确认 > 候选 > 已按过 > 下一字预测
+        const rank = { confirm: 4, candidate: 3, typed: 2, next: 1 }
+        if (prev && (rank[prev.kind] || 0) > (rank[kind] || 0)) return
+        if (prev && prev.kind === kind && prev.strong && !strong) return
+        predictMap[key] = { ch: ch || '', strong: Boolean(strong), kind: kind, final: final || '' }
       }
+      const hintLines = []
       if (live && live.text) {
         const seg = live.text.slice(live.text.lastIndexOf("'") + 1)
         const info = parseSyllables(seg, sch)
+        // 已经打完的音节：轻确认「这两个键你按对了」。这不泄露答案，可以随时显示。
         info.syllables.forEach(function (parsed) {
-          markPredict(initialKey(parsed.i, sch), '', false)
-          markPredict(finalKey(parsed.f, sch), '', false)
+          markPredict(initialKey(parsed.i, sch), '', false, 'typed', '')
+          markPredict(finalKey(parsed.f, sch), '', false, 'typed', '')
         })
         if (!info.complete && seg.charAt(0)) {
           const two = seg.slice(0, 2)
           const initial = COMMON_BY_INITIAL[two] ? two : seg.charAt(0)
-          const candidates = COMMON_BY_INITIAL[initial] || ''
-          let count = 0
-          for (let i = 0; i < candidates.length && count < 5; i += 1) {
-            const ch = candidates.charAt(i)
-            const pinyin = pinyinOf(ch)
-            const parsed = pinyin ? parsePinyin(pinyin) : null
-            if (!parsed || parsed.i !== initial) continue
-            markPredict(finalKey(parsed.f, sch), ch, count === 0)
-            count += 1
+          const schemeId = schemeBucketId(prefs)
+          // ---- 先给回忆的机会 ----
+          // 连续输入时保持安静。提示跟着每一次按键出现，就变成「读答案」，
+          // 练不出回忆；只有停下来想（停顿）或刚撤销过（说明卡住）才给。
+          const paused = live.paused === true
+          const undid = (live.shrinks || 0) > 0
+          const cands = finalHintCandidates(stats, schemeId, initial, sch)
+          const usedKeys = {}
+          for (let i = 0; i < cands.length && hintLines.length < 2; i += 1) {
+            const cand = cands[i]
+            // 两个韵母落在同一个键上，只算一个提示位置
+            if (usedKeys[cand.key]) continue
+            const rule = (stats.rules || {})[ruleIdOf(schemeId, 'f', cand.final)] || null
+            const lv = ruleLevel(rule)
+            if (lv === 0) continue
+            if (lv === 1 && !undid) continue
+            if (!paused && !undid) continue
+            usedKeys[cand.key] = true
+            markPredict(cand.key, '', cand.reason === 'conf', 'candidate', cand.final)
+            if (ui && typeof ui.markHintShown === 'function') {
+              ui.markHintShown(ruleIdOf(schemeId, 'f', cand.final))
+            }
+            hintLines.push({ final: cand.final, key: cand.key, reason: cand.reason })
+          }
+          // 完全没有个人数据时给一个最基础的兜底（仍然只点一个，不铺开）
+          if (!cands.length && (paused || undid)) {
+            const candidates = COMMON_BY_INITIAL[initial] || ''
+            for (let i = 0; i < candidates.length && !hintLines.length; i += 1) {
+              const ch = candidates.charAt(i)
+              const pinyin = pinyinOf(ch)
+              const parsed = pinyin ? parsePinyin(pinyin) : null
+              if (!parsed || parsed.i !== initial) continue
+              markPredict(finalKey(parsed.f, sch), ch, false, 'candidate', parsed.f)
+              hintLines.push({ final: parsed.f, key: finalKey(parsed.f, sch), reason: 'base' })
+            }
           }
         }
-      } else {
-        predictNext(stats, prefs, stats.lastChar).forEach(function (item, index) {
+      } else if (flash && flash.event) {
+        // 刚上屏：只确认**被纠正的**那个韵母键，并短暂显示「ie → P」。
+        // 旧实现点亮整次提交的所有键并持续 4.5 秒，会和下一字提示撞在一起。
+        const corrected = flash.event.correctedFinal
+        if (corrected) {
+          const key = finalKey(corrected, sch)
+          markPredict(key, '', true, 'confirm', corrected)
+          hintLines.push({ final: corrected, key: key, reason: 'confirm' })
+        }
+        const nexts = predictNext(stats, prefs, stats.lastChar)
+        nexts.forEach(function (item, index) {
           const parsed = parsePinyin(item.p)
           if (!parsed) return
-          markPredict(initialKey(parsed.i, sch), item.ch, index === 0)
-          markPredict(finalKey(parsed.f, sch), '', false)
+          // 已经被确认的键不再被下一字预测覆盖
+          if (predictMap[finalKey(corrected, sch)] && corrected) {
+            if (finalKey(parsed.f, sch) === finalKey(corrected, sch)) return
+          }
+          markPredict(initialKey(parsed.i, sch), item.ch, index === 0, 'next', '')
+          markPredict(finalKey(parsed.f, sch), '', false, 'next', '')
         })
+      }
+
+      // 键盘下方固定一行状态说明：不需要悬停，也不引起布局跳动
+      let hintText = ''
+      if (hintLines.length) {
+        const confirmRow = hintLines.filter(function (r) { return r.reason === 'confirm' })[0]
+        if (confirmRow) {
+          hintText = t('hintConfirm').replace('{f}', finalLabel(confirmRow.final)).replace('{k}', confirmRow.key.toUpperCase())
+        } else {
+          hintText = t('hintCandidates') + hintLines.map(function (r) {
+            return finalLabel(r.final) + ' · ' + r.key.toUpperCase()
+          }).join('，')
+        }
       }
 
       const rows = rowsData.map(function (row, rowIndex) {
@@ -1683,7 +2141,6 @@ window.__ModuleLoader__.load({
               item: item,
               sch: sch,
               size: size,
-              hot: hotKeys[key] === true,
               hovered: hover !== null && hover.k === item.k,
               level: heatLevel(keyEntry),
               friction: frictionOf(keyEntry),
@@ -1712,6 +2169,9 @@ window.__ModuleLoader__.load({
         'div',
         null,
         h('div', { style: Object.assign({}, S.keyboard, { width: blockW, margin: '0 auto' }) }, rows),
+        // 固定高度的一行状态说明：位置不变、高度不跳，不靠悬停也不用猜颜色。
+        // 没有提示时也占位，避免键盘上下跳动。
+        h('div', { style: S.statusLine }, hintText || '\u00a0'),
         h('div', { style: chromeFade },
           h('div', { style: S.hint },
             h('div', null, h('span', { style: S.hintStrong }, initialsHintFor(sch))),
@@ -1942,6 +2402,9 @@ window.__ModuleLoader__.load({
           entry.n += 1
           // 只有能确定是这一位错时才记 bad；定位不到就不记到任何键上
           if (wrongAt.indexOf(i) >= 0) entry.bad += 1
+          // 练习答对也累积熟练度——练习本来就是用来练熟的，
+          // 只算真实输入的话，光练不写的人永远淡不掉提示。
+          if (good) entry.ok = (entry.ok || 0) + 1
         }
         // 无法归因的错题单独计数，不进键的弱键率
         if (!good && !wrongAt.length) {
@@ -2761,6 +3224,8 @@ window.__ModuleLoader__.load({
 
     return {
       inject: ['slots', 'locale'],
+      // 只给测试用：直接渲染某一页，避免测试重复搭外壳
+      __test: { MapTab: MapTab, DrillTab: DrillTab, Keycap: Keycap },
       apply(ctx) {
         ctx.effect(function () { return ctx.locale.register(NS, 'zh', ZH) }, 'shuangpin-reminder: zh')
         ctx.effect(function () { return ctx.locale.register(NS, 'en', EN) }, 'shuangpin-reminder: en')
